@@ -12,6 +12,8 @@ import { getAnalytics, isSupported } from 'firebase/analytics';
 // @ts-ignore
 import firebaseConfig from '../firebase-applet-config.json';
 
+import MobileTabBar from './mobile/MobileTabBar';
+
 // Code-split the Timeline and Codex pages: they mount on first visit (then stay
 // warm), so their code stays out of the critical-path bundle for the map.
 const TimelinePage = lazy(() => import('./TimelinePage'));
@@ -1391,6 +1393,15 @@ function App() {
   const [isStyleLoaded, setIsStyleLoaded] = useState(false);
   const [windowWidth, setWindowWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 1200);
   const [scrollbarWidth, setScrollbarWidth] = useState(0);
+  // Mobile layout gate — same threshold the old "Optimized for Desktop"
+  // blocker used, now driving an adapted layout instead of a wall.
+  const isMobile = windowWidth < 1024;
+  // Side panels shrink to the viewport on phones; collapsed offset leaves the
+  // 20px toggle tab visible. All values numeric so Motion can interpolate.
+  const sidePanelWidth = isMobile ? Math.min(300, windowWidth - 40) : 300;
+  const collapsedPanelOffset = -(sidePanelWidth - 20);
+  // Everything bottom-anchored sits above the mobile tab bar.
+  const tabBarOffset = isMobile ? 56 : 0;
   const [selectedCodexNode, setSelectedCodexNode] = useState<any>(null);
 
   // Submission Form State
@@ -2955,9 +2966,11 @@ function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const [isLeftCollapsed, setIsLeftCollapsed] = useState(false);
+  // On phones the filter panel and timeline bar start collapsed so the map
+  // owns the screen; a pin tap still slides the dossier open.
+  const [isLeftCollapsed, setIsLeftCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 1024);
   const [isRightCollapsed, setIsRightCollapsed] = useState(true);
-  const [isTimelineCollapsed, setIsTimelineCollapsed] = useState(false);
+  const [isTimelineCollapsed, setIsTimelineCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 1024);
   const [hoveredBucket, setHoveredBucket] = useState<{
     count: number;
     cat: string;
@@ -3173,15 +3186,17 @@ function App() {
     return () => clearTimeout(fallbackTimeout);
   }, [isMapLoaded, isDataCompiled, isLiveLoading]);
 
-  // Onboarding Tour Trigger (after entering About Modal or manually requested)
+  // Onboarding Tour Trigger (after entering About Modal or manually requested).
+  // Suppressed on mobile: the tour's tooltips anchor to fixed desktop pixel
+  // positions and would point at nothing on a phone layout.
   useEffect(() => {
-    if (!showAboutModal && !isLiveLoading) {
+    if (!showAboutModal && !isLiveLoading && !isMobile) {
       const completed = localStorage.getItem('mtrh_onboarding_completed');
       if (!completed) {
         setOnboardingStep(0);
       }
     }
-  }, [showAboutModal, isLiveLoading]);
+  }, [showAboutModal, isLiveLoading, isMobile]);
 
   // Synchronize UI panels with onboarding steps
   useEffect(() => {
@@ -5755,48 +5770,6 @@ function App() {
   return (
     <div style={{ width: scrollbarWidth ? `calc(100vw - ${scrollbarWidth}px)` : '100vw', minHeight: '100vh', background: '#ffffff', color: '#000000', fontFamily: '"Space Mono", monospace', overflowX: 'hidden', textAlign: 'left' }}>
       
-      {/* MOBILE BLOCKER OVERLAY */}
-      <AnimatePresence>
-        {windowWidth < 1024 && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              width: scrollbarWidth ? `calc(100vw - ${scrollbarWidth}px)` : '100vw',
-              height: '100vh',
-              background: '#000000',
-              zIndex: 1000000,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '40px',
-              textAlign: 'center',
-              color: '#ffffff'
-            }}
-          >
-            <div style={{ padding: '0', maxWidth: '400px', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px' }}>
-              <img 
-                src="https://raw.githubusercontent.com/northbeastclothing-design/MTRH/main/public/mtrh-square-white.svg" 
-                alt="MTRH Logo" 
-                style={{ width: '120px' }} 
-              />
-              <div style={{ width: '40px', height: '1px', background: '#fff' }} />
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <span style={{ fontSize: '11px', fontWeight: 'bold', letterSpacing: '2px', textTransform: 'uppercase' }}>Optimized for Desktop</span>
-                <p style={{ fontSize: '11px', lineHeight: '20px', color: '#a3a3a3', margin: 0 }}>
-                  To provide the best experience for exploring our archives and interactive mapping tools, please visit MTRH on a desktop computer.
-                </p>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* GLOBAL FULL-SCREEN LOADER OVERLAY */}
       <AnimatePresence>
         {(isInitialLoad && isLiveLoading) && (
@@ -5884,24 +5857,24 @@ function App() {
 
         </motion.div>
 
-        {/* BRAND HEADER COMPONENT */}
-        <header 
-          style={{ 
-            height: '118px', 
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'space-between', 
-            padding: '0 20px 0 0', 
-            flexShrink: 0, 
-            zIndex: 20, 
-            pointerEvents: 'none', 
+        {/* BRAND HEADER COMPONENT — compact on mobile, nav pill replaced by the bottom tab bar */}
+        <header
+          style={{
+            height: isMobile ? '48px' : '118px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '0 20px 0 0',
+            flexShrink: 0,
+            zIndex: 20,
+            pointerEvents: 'none',
             position: 'relative',
             background: (currentPage === 'map' || currentPage === 'codex' || currentPage === 'timeline') ? 'transparent' : (isMapDarkMode ? '#000000' : '#ffffff'),
             transition: 'background-color 0.3s ease'
           }}
         >
-          <img src="/mtrh-horiz-words.svg" alt="MTRH Logo" style={{ height: '78px', width: '232px', pointerEvents: 'auto', filter: theme.invert }} />
-          
+          <img src="/mtrh-horiz-words.svg" alt="MTRH Logo" style={{ height: isMobile ? '36px' : '78px', width: isMobile ? '107px' : '232px', pointerEvents: 'auto', filter: theme.invert }} />
+
           {/* CENTER NAVIGATION PILL */}
           <div style={{
             position: 'absolute',
@@ -5909,7 +5882,7 @@ function App() {
             transform: 'translateX(-50%)',
             pointerEvents: 'auto',
             zIndex: 30,
-            display: 'flex',
+            display: isMobile ? 'none' : 'flex',
             gap: '8px',
             border: `1px solid ${theme.border}`,
             padding: '4px',
@@ -6024,13 +5997,14 @@ function App() {
             </div>
           </div>
 
-          {/* THEME TOGGLE: FIXED TO RIGHT */}
-          <div style={{ pointerEvents: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+          {/* THEME TOGGLE: FIXED TO RIGHT — single row on mobile to fit the 48px header */}
+          <div style={{ pointerEvents: 'auto', display: 'flex', flexDirection: isMobile ? 'row' : 'column', alignItems: isMobile ? 'center' : 'flex-end', gap: '8px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ 
-                fontSize: '9px', 
-                fontFamily: '"Space Mono", monospace', 
-                fontWeight: 700, 
+              <span style={{
+                display: isMobile ? 'none' : 'inline',
+                fontSize: '9px',
+                fontFamily: '"Space Mono", monospace',
+                fontWeight: 700,
                 color: theme.text,
                 letterSpacing: '1px'
               }}>
@@ -6147,6 +6121,11 @@ function App() {
           </div>
         </header>
 
+        {/* MOBILE BOTTOM TAB BAR — replaces the header nav pill below 1024px */}
+        {isMobile && (
+          <MobileTabBar currentPage={currentPage} setCurrentPage={setCurrentPage} theme={theme} />
+        )}
+
         {/* CORE WORKSPACE FRAMING GRID — NOW FULL BLEED OVERLAY ENVIRONMENT */}
         <div style={{ flex: 1, position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
           {/* Map Overlay Panel */}
@@ -6209,21 +6188,21 @@ function App() {
           />
 
           {/* LEFT COMPONENT: FILTERS MANAGEMENT PANEL */}
-          <motion.div 
+          <motion.div
             className="custom-sidebar-scrollbar"
             initial={false}
-            animate={{ 
-              left: isLeftCollapsed ? -280 : 20,
-              bottom: isTimelineCollapsed ? 0 : 150,
+            animate={{
+              left: isLeftCollapsed ? collapsedPanelOffset : 20,
+              bottom: (isTimelineCollapsed ? 0 : 150) + tabBarOffset,
               background: theme.bg,
               borderColor: theme.border,
               opacity: 1
             }}
             transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-            style={{ 
+            style={{
               position: 'absolute',
               top: 0,
-              width: '300px', 
+              width: `${sidePanelWidth}px`,
               borderRight: '1px solid',
               borderTop: '1px solid',
               display: 'flex', 
@@ -6816,23 +6795,23 @@ function App() {
           </motion.div>
 
           {/* RIGHT COMPONENT: DOSSIER SIDEBAR WINDOW PANEL */}
-          <motion.div 
+          <motion.div
             initial={false}
-            animate={{ 
-              right: isRightCollapsed ? -280 : 20,
-              bottom: isTimelineCollapsed ? 0 : 150,
+            animate={{
+              right: isRightCollapsed ? collapsedPanelOffset : 20,
+              bottom: (isTimelineCollapsed ? 0 : 150) + tabBarOffset,
               background: theme.bg,
               borderColor: theme.border,
               opacity: 1
             }}
-            transition={{ 
+            transition={{
               right: { type: 'spring', stiffness: 240, damping: 28 },
               default: { duration: 0.5, ease: [0.16, 1, 0.3, 1] }
             }}
-            style={{ 
+            style={{
               position: 'absolute',
               top: 0,
-              width: '300px',
+              width: `${sidePanelWidth}px`,
               borderLeft: '1px solid',
               borderTop: '1px solid',
               display: 'flex', 
@@ -7792,10 +7771,10 @@ function App() {
           </motion.div>
 
           {/* HORIZONTAL COMPONENT: TIMELINE CONTROLS AS FLOATING ABSOLUTE OVERLAY */}
-          <motion.div 
+          <motion.div
             initial={false}
-            animate={{ 
-              bottom: isTimelineCollapsed ? -150 : 0,
+            animate={{
+              bottom: (isTimelineCollapsed ? -150 : 0) + tabBarOffset,
               background: theme.bg,
               borderColor: theme.border
             }}
@@ -8049,29 +8028,30 @@ function App() {
                     </div>
                   </div>
 
-                  {/* TIMELINE MAIN BODY */}
-                  <div 
-                    style={{ flex: 1, display: 'flex', alignItems: 'center', padding: '0 30px', background: theme.bg, position: 'relative', overflow: 'hidden' }}
-              onMouseDown={(e) => {
+                  {/* TIMELINE MAIN BODY — pointer events cover mouse AND touch drags */}
+                  <div
+                    style={{ flex: 1, display: 'flex', alignItems: 'center', padding: '0 30px', background: theme.bg, position: 'relative', overflow: 'hidden', touchAction: 'none' }}
+              onPointerDown={(e) => {
                 if (e.target instanceof HTMLInputElement) return; // Don't drag if clicking sliders
+                e.currentTarget.setPointerCapture(e.pointerId);
                 setIsTimelineDragging(true);
                 setDragStartX(e.clientX);
                 setDragStartTimelineStart(timelineWindowStart);
               }}
-              onMouseMove={(e) => {
+              onPointerMove={(e) => {
                 if (!isTimelineDragging || !timelineRef.current) return;
                 const deltaX = e.clientX - dragStartX;
                 const pixelWidth = timelineRef.current.clientWidth;
                 const yearsPerPixel = timelineWindowSpan / pixelWidth;
                 const yearDelta = deltaX * yearsPerPixel;
-                
+
                 let newStart = dragStartTimelineStart - yearDelta;
                 // Constrain
                 newStart = Math.max(timeBounds.min, Math.min(timeBounds.max - timelineWindowSpan, newStart));
                 setTimelineWindowStart(newStart);
               }}
-              onMouseUp={() => setIsTimelineDragging(false)}
-              onMouseLeave={() => setIsTimelineDragging(false)}
+              onPointerUp={() => setIsTimelineDragging(false)}
+              onPointerCancel={() => setIsTimelineDragging(false)}
             >
               
               {/* PAN LEFT BUTTON */}
@@ -9186,8 +9166,8 @@ function App() {
               transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
               style={{
                 backgroundColor: '#ffffff',
-                width: '671px',
-                height: '530px',
+                width: 'min(671px, calc(100vw - 24px))',
+                height: 'min(530px, 90vh)',
                 position: 'relative',
                 textAlign: 'center',
                 boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
@@ -9264,7 +9244,7 @@ function App() {
                 marginBottom: '20px',
                 color: '#000000',
                 lineHeight: '1.2',
-                width: '570px',
+                width: 'min(570px, calc(100vw - 72px))',
                 textAlign: 'center'
               }}>
                 We are Mapping the Rabbit Hole
@@ -9275,7 +9255,7 @@ function App() {
                 fontSize: '12px',
                 lineHeight: '20px',
                 color: '#000000',
-                width: '570px',
+                width: 'min(570px, calc(100vw - 72px))',
                 marginBottom: '16px',
                 textAlign: 'center'
               }}>
@@ -9287,7 +9267,7 @@ function App() {
                 fontSize: '11px',
                 lineHeight: '18px',
                 color: '#666666',
-                width: '570px',
+                width: 'min(570px, calc(100vw - 72px))',
                 marginBottom: '30px',
                 textAlign: 'center',
                 fontStyle: 'italic'
