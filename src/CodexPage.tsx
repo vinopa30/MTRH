@@ -540,7 +540,7 @@ const getEmbedUrl = (url: string) => {
 
 const cleanAndProxyImageUrl = (url: any) => {
   if (!url || typeof url !== 'string') return MISSING_IMAGE_URL;
-  
+
   const trimmedUrl = url.trim();
   if (trimmedUrl.includes('icon-missing-image.svg')) return MISSING_IMAGE_URL;
 
@@ -558,7 +558,7 @@ const cleanAndProxyImageUrl = (url: any) => {
 
   const lowerUrl = trimmedUrl.toLowerCase();
   const isWiki = lowerUrl.includes('wikimedia.org') || lowerUrl.includes('wikipedia.org');
-  
+
   if (
     isWiki ||
     lowerUrl.includes('unsplash.com') ||

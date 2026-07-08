@@ -1,14 +1,24 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {defineConfig, loadEnv} from 'vite';
+import {defineConfig} from 'vite';
 
-export default defineConfig(({mode}) => {
-  const env = loadEnv(mode, '.', '');
+export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
-    define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+    build: {
+      rollupOptions: {
+        output: {
+          // Split heavy vendors into their own long-term-cacheable chunks so app
+          // updates don't re-download mapbox/firebase, and vice versa.
+          manualChunks: {
+            'vendor-react': ['react', 'react-dom'],
+            'vendor-mapbox': ['mapbox-gl'],
+            'vendor-firebase': ['firebase/app', 'firebase/firestore', 'firebase/auth', 'firebase/analytics'],
+            'vendor-motion': ['motion'],
+          },
+        },
+      },
     },
     resolve: {
       alias: {

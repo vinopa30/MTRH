@@ -1,5 +1,5 @@
 // Mapping The Rabbit Hole App Component
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, Suspense, lazy } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, animate } from 'motion/react';
 import mapboxgl from 'mapbox-gl';
@@ -12,8 +12,10 @@ import { getAnalytics, isSupported } from 'firebase/analytics';
 // @ts-ignore
 import firebaseConfig from '../firebase-applet-config.json';
 
-import TimelinePage from './TimelinePage';
-import CodexPage from './CodexPage';
+// Code-split the Timeline and Codex pages: they mount on first visit (then stay
+// warm), so their code stays out of the critical-path bundle for the map.
+const TimelinePage = lazy(() => import('./TimelinePage'));
+const CodexPage = lazy(() => import('./CodexPage'));
 import { TIMELINE_ITEMS, TIMELINE_LOCATIONS, BIBLICAL_TRAVEL_PATHS, Waypoint, TravelPath } from './timelineData';
 // import { ARCHAEOLOGICAL_FINDS_DATA } from './archaeologyData';
 import { TERM_TREE_DATA } from './termTreeData';
@@ -588,7 +590,7 @@ const cleanAndProxyImageUrl = (url: any) => {
   );
 
   const isWiki = lowerUrl.includes('wikimedia.org') || lowerUrl.includes('wikipedia.org');
-  
+
   if (
     isWiki ||
     lowerUrl.includes('unsplash.com') ||
@@ -599,7 +601,7 @@ const cleanAndProxyImageUrl = (url: any) => {
     return trimmedUrl;
   }
 
-  // Route everything through our local server proxy, which is highly reliable, 
+  // Route everything through our local server proxy, which is highly reliable,
   // bypasses SameSite cookie limitations, and avoids rate limiting of public proxies.
   if (trimmedUrl.startsWith('http')) {
     return `/api/proxy-resource?url=${encodeURIComponent(trimmedUrl)}`;
@@ -946,6 +948,9 @@ function App() {
   const [pointsAndLinesData, setPointsAndLinesData] = useState<any[]>([]);
   const [rabbitHoleData, setRabbitHoleData] = useState<any[]>([]);
   const [ufoData, setUfoData] = useState<any[]>([]);
+  // Tracks which UFO dataset chunks have been (or are being) loaded so each
+  // layer only pulls its own files, and never twice.
+  const loadedUfoChunksRef = useRef<Set<string>>(new Set());
   const [archaeologyData, setArchaeologyData] = useState<any[]>([]);
   const [missing411Data, setMissing411Data] = useState<any[]>([]);
   const [cavesData, setCavesData] = useState<any[]>([]);
@@ -964,6 +969,20 @@ function App() {
     if (path.startsWith('/codex')) return 'codex';
     return 'map';
   });
+  // Mount Timeline/Codex on first visit, then keep them warm — pairs with the
+  // React.lazy imports so neither page's chunk loads until it's actually opened.
+  const [mountedPages, setMountedPages] = useState<{ timeline: boolean; codex: boolean }>(() => {
+    const path = window.location.pathname.toLowerCase();
+    return {
+      timeline: path.startsWith('/timeline'),
+      codex: path.startsWith('/codex'),
+    };
+  });
+  useEffect(() => {
+    if (currentPage === 'timeline' || currentPage === 'codex') {
+      setMountedPages(prev => (prev[currentPage] ? prev : { ...prev, [currentPage]: true }));
+    }
+  }, [currentPage]);
   const [selectedTimelineItem, setSelectedTimelineItem] = useState<any | null>(null);
   const [activeWaypointIndex, setActiveWaypointIndex] = useState<number | null>(null);
 
@@ -3663,28 +3682,48 @@ function App() {
   // Dynamically load datasets on demand based on active layers
   useEffect(() => {
     const loadDatasets = async () => {
-      // 1. UFO Datasets
-      const hasUfoActive = activeLayers['UFOs - War.gov'] || activeLayers['UFOs - Brazillian Archives'] || activeLayers['UFOs - Sightings'] || activeLayers['Secret Government Programs'];
-      if (hasUfoActive && ufoData.length === 0) {
-        try {
-          const [ufo1, ufo2, war1, war2, war3, br] = await Promise.all([
-            import('./ufoData-1.json'),
-            import('./ufoData-2.json'),
-            import('./warGovData.json'),
-            import('./warGovData-2.json'),
-            import('./warGovData-3.json'),
-            import('./brazilianUfoData.json')
-          ]);
-          setUfoData([
-            ...getSafeData(ufo1),
-            ...getSafeData(ufo2),
-            ...getSafeData(war1),
-            ...getSafeData(war2),
-            ...getSafeData(war3),
-            ...getSafeData(br)
-          ]);
-        } catch (err) {
-          console.error("Failed to load UFO datasets:", err);
+      // 1. UFO Datasets — loaded per layer instead of as one ~5.9MB bundle, so
+      // toggling e.g. Brazillian Archives no longer downloads every UFO file.
+      const ufoSources: { key: string; active: boolean; load: () => Promise<any[]> }[] = [
+        {
+          key: 'sightings', // records normalize to 'UFOs - Sightings'
+          active: !!activeLayers['UFOs - Sightings'],
+          load: async () => {
+            const [a, b] = await Promise.all([
+              import('./ufoData-1.json'),
+              import('./ufoData-2.json')
+            ]);
+            return [...getSafeData(a), ...getSafeData(b)];
+          }
+        },
+        {
+          key: 'wargov', // records normalize to 'UFOs - War.gov'
+          active: !!(activeLayers['UFOs - War.gov'] || activeLayers['Secret Government Programs']),
+          load: async () => {
+            const [a, b, c] = await Promise.all([
+              import('./warGovData.json'),
+              import('./warGovData-2.json'),
+              import('./warGovData-3.json')
+            ]);
+            return [...getSafeData(a), ...getSafeData(b), ...getSafeData(c)];
+          }
+        },
+        {
+          key: 'brazilian',
+          active: !!activeLayers['UFOs - Brazillian Archives'],
+          load: async () => getSafeData(await import('./brazilianUfoData.json'))
+        }
+      ];
+      for (const source of ufoSources) {
+        if (source.active && !loadedUfoChunksRef.current.has(source.key)) {
+          loadedUfoChunksRef.current.add(source.key);
+          try {
+            const records = await source.load();
+            setUfoData(prev => [...prev, ...records]);
+          } catch (err) {
+            loadedUfoChunksRef.current.delete(source.key);
+            console.error(`Failed to load UFO dataset chunk "${source.key}":`, err);
+          }
         }
       }
 
@@ -3871,10 +3910,12 @@ function App() {
   useEffect(() => {
     if (uniqueCategories.length > 0 && !hasRandomizedRef.current) {
       hasRandomizedRef.current = true;
-      const count = Math.floor(Math.random() * 3) + 4; // Choose 4, 5, or 6 layers
-      const shuffled = [...uniqueCategories].sort(() => 0.5 - Math.random());
-      const selected = shuffled.slice(0, count);
-      
+      // Curated, deterministic boot layers. The old random 4-6 pick meant a
+      // ~50% chance of downloading the multi-MB UFO datasets on first paint;
+      // the shuffle button still offers the random dive on demand.
+      const CURATED_INITIAL_LAYERS = ['Megaliths / Structures', 'Cryptid Sightings', 'D.U.M.B.\'s', 'Crop Circles'];
+      const selected = CURATED_INITIAL_LAYERS.filter(cat => uniqueCategories.includes(cat));
+
       const initialActive: Record<string, boolean> = {};
       uniqueCategories.forEach(cat => {
         initialActive[cat] = selected.includes(cat);
@@ -8457,9 +8498,9 @@ function App() {
             zIndex: currentPage === 'timeline' ? 12 : 0
           }}
         >
-          <TimelinePage 
-            theme={theme} 
-            isMapDarkMode={isMapDarkMode} 
+          {mountedPages.timeline && <Suspense fallback={null}><TimelinePage
+            theme={theme}
+            isMapDarkMode={isMapDarkMode}
             timelineItems={combinedTimelineItems}
             selectedItem={selectedTimelineItem}
             setSelectedItem={setSelectedTimelineItem}
@@ -8476,7 +8517,7 @@ function App() {
               setFocusedCodexTermId(termId);
               setCurrentPage('codex');
             }}
-          />
+          /></Suspense>}
         </div>
 
         {/* Codex Panel */}
@@ -8499,7 +8540,7 @@ function App() {
             zIndex: currentPage === 'codex' ? 12 : 0
           }}
         >
-          <CodexPage
+          {mountedPages.codex && <Suspense fallback={null}><CodexPage
             theme={theme}
             codexNodes={combinedCodexNodes}
             isMapDarkMode={isMapDarkMode}
@@ -8554,7 +8595,7 @@ function App() {
             onSelectedTermChange={(node) => {
               setSelectedCodexNode(node);
             }}
-          />
+          /></Suspense>}
         </div>
       </div>
 

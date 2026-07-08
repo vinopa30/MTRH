@@ -5,6 +5,8 @@ import fs from "fs";
 import admin from "firebase-admin";
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
+import compression from "compression";
+import rateLimit from "express-rate-limit";
 
 // Load environment variables
 dotenv.config();
@@ -277,6 +279,10 @@ async function sendNotificationEmail(subject: string, textBody: string, htmlBody
 async function startServer() {
   const app = express();
 
+  // Cloud Run sits behind a trusted load balancer — needed so req.ip (and the
+  // rate limiter) sees the real client IP from X-Forwarded-For.
+  app.set("trust proxy", 1);
+
   // Dynamic host verification for Firebase Authentication domains
   app.use((req, res, next) => {
     const host = req.hostname || req.headers.host?.split(":")[0];
@@ -289,6 +295,15 @@ async function startServer() {
     }
     next();
   });
+
+  // Gzip responses (JS bundles and JSON data chunks compress roughly 4:1).
+  app.use(compression());
+
+  // Rate limits for the public, unauthenticated endpoints.
+  const publicWriteLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
+  const proxyLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 600, standardHeaders: true, legacyHeaders: false });
+  app.use(["/api/submissions/create", "/api/reports/create", "/api/upload"], publicWriteLimiter);
+  app.use(["/api/proxy-resource", "/api/uap-archive"], proxyLimiter);
 
   // Set payload sizes to allow base64 file uploads
   app.use(express.json({ limit: "50mb" }));
@@ -851,11 +866,43 @@ ${modLink}
     }
   });
 
+  // Rejects proxy targets that could reach internal infrastructure (SSRF):
+  // non-http(s) schemes, localhost, private/link-local IP literals, and cloud
+  // metadata hostnames. Public hostnames are allowed through unchanged.
+  const isForbiddenProxyTarget = (rawUrl: string): boolean => {
+    let parsed: URL;
+    try {
+      parsed = new URL(rawUrl);
+    } catch {
+      return true;
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return true;
+    const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    if (
+      host === "localhost" || host.endsWith(".localhost") ||
+      host === "metadata.google.internal" || host.endsWith(".internal") ||
+      host === "::1" || host.startsWith("fe80:") || host.startsWith("fd") || host.startsWith("fc")
+    ) return true;
+    // IPv4 literals: block loopback, private, link-local, and 0.0.0.0/8 ranges
+    const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (ipv4) {
+      const [a, b] = [parseInt(ipv4[1], 10), parseInt(ipv4[2], 10)];
+      if (
+        a === 0 || a === 10 || a === 127 ||
+        (a === 172 && b >= 16 && b <= 31) ||
+        (a === 192 && b === 168) ||
+        (a === 169 && b === 254)
+      ) return true;
+    }
+    return false;
+  };
+
   // Image/Video Proxy Route to bypass hotlinking, CORS, and support range requests
   app.get("/api/proxy-resource", async (req, res) => {
     const url = req.query.url as string;
     if (!url) return res.status(400).send("URL is required");
-    
+    if (isForbiddenProxyTarget(url)) return res.status(403).send("Forbidden proxy target");
+
     try {
       // Determine probable Referer based on domain
       let referer = 'https://uap-files.pages.dev/';
