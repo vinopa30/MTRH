@@ -8286,33 +8286,7 @@ function App() {
               onPointerCancel={() => setIsTimelineDragging(false)}
             >
               
-              {/* PAN LEFT BUTTON */}
-              <motion.button 
-                initial={false}
-                animate={{ 
-                  opacity: timelineWindowStart <= timeBounds.min ? 0 : 1,
-                  pointerEvents: timelineWindowStart <= timeBounds.min ? 'none' : 'auto'
-                }}
-                whileHover={{ opacity: 0.7 }}
-                onClick={() => setTimelineWindowStart(prev => Math.max(timeBounds.min, prev - (timelineWindowSpan * 0.1)))}
-                style={{
-                  width: '48px',
-                  height: '48px',
-                  borderRadius: '50%',
-                  background: isMapDarkMode ? 'transparent' : theme.bg,
-                  border: `1px solid ${isMapDarkMode ? '#ffffff' : theme.border}`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  zIndex: 2,
-                  marginRight: '12px',
-                  flexShrink: 0,
-                  transition: 'background-color 0.2s ease'
-                }}
-              >
-                <img src="/icons/icon-arrow-left.svg" style={{ width: '10px', height: '18px', filter: isMapDarkMode ? 'brightness(0)' : 'brightness(0)' }} alt="pan left" />
-              </motion.button>
+              {/* Pan is drag-only now (circle arrow buttons removed). */}
 
               {/* TIMELINE VISUAL AREA */}
               <div ref={timelineRef} style={{ 
@@ -8629,37 +8603,10 @@ function App() {
                 </div>
               </div>
 
-              {/* PAN RIGHT BUTTON */}
-              <motion.button 
-                initial={false}
-                animate={{ 
-                  opacity: (timelineWindowStart + timelineWindowSpan) >= timeBounds.max ? 0 : 1,
-                  pointerEvents: (timelineWindowStart + timelineWindowSpan) >= timeBounds.max ? 'none' : 'auto'
-                }}
-                whileHover={{ opacity: 0.7 }}
-                onClick={() => setTimelineWindowStart(prev => Math.min(timeBounds.max - timelineWindowSpan, prev + (timelineWindowSpan * 0.1)))}
-                style={{
-                  width: '48px',
-                  height: '48px',
-                  borderRadius: '50%',
-                  background: isMapDarkMode ? 'transparent' : theme.bg,
-                  border: `1px solid ${isMapDarkMode ? '#ffffff' : theme.border}`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  zIndex: 2,
-                  marginLeft: '12px',
-                  flexShrink: 0,
-                  transition: 'background-color 0.2s ease'
-                }}
-              >
-                <img src="/icons/icon-arrow-left.svg" style={{ width: '10px', height: '18px', transform: 'rotate(180deg)', filter: isMapDarkMode ? 'brightness(0)' : 'brightness(0)' }} alt="pan right" />
-              </motion.button>
             </div>
 
-            {/* CUSTOM TIMELINE TOOLTIP OVERLAY - ALIGNED TO DOTS FIELD */}
-            <div style={{ position: 'absolute', top: '40px', bottom: 0, left: '110px', right: '110px', pointerEvents: 'none', overflow: 'visible', zIndex: 1000 }}>
+            {/* CUSTOM TIMELINE TOOLTIP OVERLAY - ALIGNED TO DOTS FIELD (visual area has 20px side margins) */}
+            <div style={{ position: 'absolute', top: '40px', bottom: 0, left: '20px', right: '20px', pointerEvents: 'none', overflow: 'visible', zIndex: 1000 }}>
               <AnimatePresence>
                 {hoveredBucket && (
                   <motion.div
