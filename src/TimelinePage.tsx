@@ -184,6 +184,10 @@ export default function TimelinePage({
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const hasDraggedRef = useRef(false);
+  // Two-finger pinch on touch: tracks active pointers and the gesture baseline
+  // so the year window zooms around the pinch midpoint.
+  const activePointersRef = useRef<Map<number, number>>(new Map());
+  const pinchRef = useRef<{ dist: number; anchorYear: number; anchorFrac: number; span: number } | null>(null);
 
   // Match the active timeline item to a Codex term
   const codexTerm = useMemo(() => {
@@ -418,6 +422,22 @@ export default function TimelinePage({
   // Pointer events cover mouse AND touch, so the year window pans by finger drag.
   const handleMouseDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return; // Primary pointer only
+    activePointersRef.current.set(e.pointerId, e.clientX);
+    if (activePointersRef.current.size === 2 && scrollContainerRef.current) {
+      // Begin pinch: anchor the year under the pinch midpoint.
+      const xs: number[] = Array.from(activePointersRef.current.values());
+      const rect = scrollContainerRef.current.getBoundingClientRect();
+      const midX = (xs[0] + xs[1]) / 2;
+      const frac = Math.min(1, Math.max(0, (midX - rect.left) / rect.width));
+      pinchRef.current = {
+        dist: Math.abs(xs[0] - xs[1]),
+        anchorFrac: frac,
+        anchorYear: viewStart + frac * span,
+        span,
+      };
+      setIsDragging(false);
+      return;
+    }
     setIsDragging(true);
     setStartX(e.clientX);
     setStartViewStart(viewStart);
@@ -425,6 +445,23 @@ export default function TimelinePage({
   };
 
   const handleMouseMove = (e: React.PointerEvent) => {
+    if (activePointersRef.current.has(e.pointerId)) {
+      activePointersRef.current.set(e.pointerId, e.clientX);
+    }
+    // Pinch zoom takes precedence over pan while two fingers are down.
+    if (activePointersRef.current.size >= 2 && pinchRef.current) {
+      const xs: number[] = Array.from(activePointersRef.current.values());
+      const newDist = Math.abs(xs[0] - xs[1]) || 1;
+      const ratio = pinchRef.current.dist / newDist; // fingers apart => ratio<1 => zoom in
+      let newSpan = pinchRef.current.span * ratio;
+      newSpan = Math.max(50, Math.min(253500, newSpan));
+      const newStart = pinchRef.current.anchorYear - pinchRef.current.anchorFrac * newSpan;
+      const clampedStart = Math.max(-250000, Math.min(3500 - newSpan, newStart));
+      setViewStart(clampedStart);
+      setViewEnd(clampedStart + newSpan);
+      hasDraggedRef.current = true;
+      return;
+    }
     if (!isDragging || !scrollContainerRef.current) return;
     const deltaX = e.clientX - startX;
     if (Math.abs(deltaX) > 5) {
@@ -445,6 +482,10 @@ export default function TimelinePage({
   };
 
   const handleMouseUpOrLeave = (e: React.PointerEvent) => {
+    activePointersRef.current.delete(e.pointerId);
+    if (activePointersRef.current.size < 2) {
+      pinchRef.current = null;
+    }
     setIsDragging(false);
     if ((e.type === 'pointerup' || e.type === 'mouseup') && !hasDraggedRef.current) {
       // Tap on empty track space clears selection and (mobile) the trace.

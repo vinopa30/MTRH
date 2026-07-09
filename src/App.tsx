@@ -3132,6 +3132,14 @@ function App() {
   // Tracks a touch on the lightbox so a horizontal swipe pages images (and is
   // not misread as a tap-to-close on the backdrop).
   const lightboxTouchRef = useRef<{ x: number; y: number; swiped: boolean }>({ x: 0, y: 0, swiped: false });
+  // Pinch-to-zoom state for the lightbox image (mobile).
+  const [lbZoom, setLbZoom] = useState<{ scale: number; tx: number; ty: number }>({ scale: 1, tx: 0, ty: 0 });
+  const lbPointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const lbPinchRef = useRef<{ dist: number; startScale: number } | null>(null);
+  const lbZoomedRef = useRef(false);
+  useEffect(() => { lbZoomedRef.current = lbZoom.scale > 1.01; }, [lbZoom.scale]);
+  // Reset zoom whenever the image changes or the lightbox closes.
+  useEffect(() => { setLbZoom({ scale: 1, tx: 0, ty: 0 }); }, [activeImageIndex, isLightboxOpen]);
 
   const activeAssets = useMemo(() => {
     return getCombinedAssets(selectedFeature?.images || []);
@@ -8751,6 +8759,8 @@ function App() {
                 lightboxTouchRef.current.swiped = false;
                 return;
               }
+              // Don't close while zoomed in — tap should stay on the image.
+              if (lbZoomedRef.current) return;
               setIsLightboxOpen(false);
             }}
             onTouchStart={(e) => {
@@ -8759,6 +8769,8 @@ function App() {
             }}
             onTouchEnd={(e) => {
               if (!activeAssets || activeAssets.length < 2) return;
+              // While zoomed, one-finger movement pans the image, never pages.
+              if (lbZoomedRef.current) return;
               const t = e.changedTouches[0];
               const dx = t.clientX - lightboxTouchRef.current.x;
               const dy = t.clientY - lightboxTouchRef.current.y;
@@ -8921,14 +8933,48 @@ function App() {
                           </div>
                         </motion.div>
                       ) : (
-                        <motion.img 
+                        <motion.img
                           key={`${selectedFeature.id}-${activeImageIndex}`}
                           initial={{ opacity: 0, scale: 0.95 }}
-                          animate={{ opacity: isLightboxImageLoading ? 0 : 1, scale: 1 }}
+                          animate={{ opacity: isLightboxImageLoading ? 0 : 1, scale: lbZoom.scale, x: lbZoom.tx, y: lbZoom.ty }}
                           exit={{ opacity: 0, scale: 1.05 }}
-                          transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-                          src={imgSrc} 
-                          alt="High resolution dossier archive asset" 
+                          transition={lbPinchRef.current || lbZoom.scale > 1.01 ? { duration: 0 } : { duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+                          onDoubleClick={() => { if (isMobile) setLbZoom(z => z.scale > 1.01 ? { scale: 1, tx: 0, ty: 0 } : { scale: 2, tx: 0, ty: 0 }); }}
+                          onPointerDown={isMobile ? (e) => {
+                            lbPointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+                            if (lbPointersRef.current.size === 2) {
+                              const pts: { x: number; y: number }[] = Array.from(lbPointersRef.current.values());
+                              lbPinchRef.current = { dist: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1, startScale: lbZoom.scale };
+                            }
+                            if (lbPointersRef.current.size === 2 || lbZoomedRef.current) e.stopPropagation();
+                          } : undefined}
+                          onPointerMove={isMobile ? (e) => {
+                            if (!lbPointersRef.current.has(e.pointerId)) return;
+                            const prev = lbPointersRef.current.get(e.pointerId)!;
+                            lbPointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+                            if (lbPointersRef.current.size >= 2 && lbPinchRef.current) {
+                              const pts: { x: number; y: number }[] = Array.from(lbPointersRef.current.values());
+                              const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
+                              const scale = Math.max(1, Math.min(5, lbPinchRef.current.startScale * (dist / lbPinchRef.current.dist)));
+                              setLbZoom(z => ({ ...z, scale }));
+                              e.stopPropagation();
+                            } else if (lbZoomedRef.current) {
+                              // One-finger pan while zoomed.
+                              setLbZoom(z => ({ ...z, tx: z.tx + (e.clientX - prev.x), ty: z.ty + (e.clientY - prev.y) }));
+                              e.stopPropagation();
+                            }
+                          } : undefined}
+                          onPointerUp={isMobile ? (e) => {
+                            lbPointersRef.current.delete(e.pointerId);
+                            if (lbPointersRef.current.size < 2) lbPinchRef.current = null;
+                            if (lbZoom.scale <= 1.01) setLbZoom({ scale: 1, tx: 0, ty: 0 });
+                          } : undefined}
+                          onPointerCancel={isMobile ? (e) => {
+                            lbPointersRef.current.delete(e.pointerId);
+                            if (lbPointersRef.current.size < 2) lbPinchRef.current = null;
+                          } : undefined}
+                          src={imgSrc}
+                          alt="High resolution dossier archive asset"
                           referrerPolicy="no-referrer"
                           onLoad={() => setIsLightboxImageLoading(false)}
                           onError={(e) => {
@@ -8937,15 +8983,17 @@ function App() {
                               setBrokenImages(prev => ({ ...prev, [curAsset.url]: true }));
                             }
                           }}
-                          style={{ 
-                            maxWidth: '100%', 
-                            maxHeight: '100%', 
-                            objectFit: 'contain', 
+                          style={{
+                            maxWidth: '100%',
+                            maxHeight: '100%',
+                            objectFit: 'contain',
                             margin: 'auto',
                             backgroundColor: 'transparent',
                             width: isBroken ? '96px' : 'auto',
                             height: isBroken ? '96px' : 'auto',
-                            filter: isBroken ? 'invert(1)' : 'none'
+                            filter: isBroken ? 'invert(1)' : 'none',
+                            touchAction: isMobile ? 'none' : undefined,
+                            cursor: lbZoom.scale > 1.01 ? 'grab' : undefined
                           }}
                         />
                       )}

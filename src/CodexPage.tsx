@@ -1085,6 +1085,21 @@ export default function CodexPage({
     setSelectedPath(path);
   };
 
+  // Build a selection path from root to a node by walking parentId links, so a
+  // cross-reference jump lands the drill-down (and breadcrumb) at that term.
+  const buildPathToNode = (id: string): string[] => {
+    const path: string[] = [];
+    const seen = new Set<string>();
+    let currentId: string | undefined = id;
+    while (currentId && !seen.has(currentId)) {
+      seen.add(currentId);
+      path.unshift(currentId);
+      const node = nodes.find(n => n.id === currentId);
+      currentId = node?.parentId;
+    }
+    return path;
+  };
+
   // Update selection pathways and cross-links lines
   const updateLines = () => {
     if (!columnsContainerRef.current || !svgOverlayRef.current) return;
@@ -2792,6 +2807,46 @@ export default function CodexPage({
                       [{activeTermNode.subLabel}]
                     </div>
                   )}
+
+                  {/* Cross-references — the SVG threads from the desktop board as tappable chips (mobile) */}
+                  {isMobile && activeTermNode.relatedIds && activeTermNode.relatedIds.length > 0 && (() => {
+                    const related = activeTermNode.relatedIds
+                      .map(rid => nodes.find(n => n.id === rid))
+                      .filter((n): n is TermNode => !!n);
+                    if (related.length === 0) return null;
+                    return (
+                      <div style={{ marginBottom: '16px' }}>
+                        <div style={{ fontSize: '9px', letterSpacing: '0.18em', color: theme.textDim, marginBottom: '8px', fontFamily: '"Space Mono", monospace' }}>
+                          CROSS-REFERENCES [{related.length}]
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                          {related.map(rel => (
+                            <button
+                              key={rel.id}
+                              onClick={() => setSelectedPath(buildPathToNode(rel.id))}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                background: 'transparent',
+                                color: theme.text,
+                                border: `1px solid ${activeRootColor}`,
+                                padding: '6px 10px',
+                                borderRadius: '2px',
+                                cursor: 'pointer',
+                                fontSize: '10px',
+                                fontFamily: '"Space Mono", monospace',
+                                letterSpacing: '0.04em',
+                                textAlign: 'left',
+                              }}
+                            >
+                              {rel.name} <span style={{ color: theme.textDim }}>▸</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Actions Row (Flag, View on Map, View on Timeline) */}
                   <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
