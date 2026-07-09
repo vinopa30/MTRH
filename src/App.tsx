@@ -1430,7 +1430,7 @@ function App() {
   const sidePanelWidth = isMobile ? Math.min(300, windowWidth - 40) : 300;
   const collapsedPanelOffset = -(sidePanelWidth - 20);
   // Everything bottom-anchored sits above the mobile tab bar.
-  const tabBarOffset = isMobile ? 56 : 0;
+  const tabBarOffset = isMobile ? 40 : 0;
   const [selectedCodexNode, setSelectedCodexNode] = useState<any>(null);
 
   // Submission Form State
@@ -6195,7 +6195,7 @@ function App() {
             style={{
               position: 'fixed',
               left: '16px',
-              bottom: 'calc(56px + 16px + env(safe-area-inset-bottom, 0px))',
+              bottom: 'calc(40px + 16px + env(safe-area-inset-bottom, 0px))',
               zIndex: 400,
               display: 'flex',
               alignItems: 'center',

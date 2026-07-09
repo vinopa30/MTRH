@@ -30,7 +30,7 @@ const MobileTabBar: React.FC<MobileTabBarProps> = ({ currentPage, setCurrentPage
         left: 0,
         right: 0,
         bottom: 0,
-        height: 'calc(56px + env(safe-area-inset-bottom, 0px))',
+        height: 'calc(40px + env(safe-area-inset-bottom, 0px))',
         paddingBottom: 'env(safe-area-inset-bottom, 0px)',
         display: 'flex',
         background: theme.bg,
@@ -60,6 +60,9 @@ const MobileTabBar: React.FC<MobileTabBarProps> = ({ currentPage, setCurrentPage
               textTransform: 'uppercase',
               cursor: 'pointer',
               padding: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
             [ {tab.label} ]
