@@ -13,6 +13,7 @@ import { getAnalytics, isSupported } from 'firebase/analytics';
 import firebaseConfig from '../firebase-applet-config.json';
 
 import MobileTabBar from './mobile/MobileTabBar';
+import { useBackGesture } from './mobile/useBackGesture';
 
 // Code-split the Timeline and Codex pages: they mount on first visit (then stay
 // warm), so their code stays out of the critical-path bundle for the map.
@@ -3125,7 +3126,10 @@ function App() {
 
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
-  
+  // Tracks a touch on the lightbox so a horizontal swipe pages images (and is
+  // not misread as a tap-to-close on the backdrop).
+  const lightboxTouchRef = useRef<{ x: number; y: number; swiped: boolean }>({ x: 0, y: 0, swiped: false });
+
   const activeAssets = useMemo(() => {
     return getCombinedAssets(selectedFeature?.images || []);
   }, [selectedFeature]);
@@ -3197,6 +3201,16 @@ function App() {
       }
     }
   }, [showAboutModal, isLiveLoading, isMobile]);
+
+  // On mobile, route the system back gesture through open overlays (top-most
+  // first) so it closes them instead of leaving the site.
+  useBackGesture(isMobile, [
+    { isOpen: isLightboxOpen, close: () => setIsLightboxOpen(false) },
+    { isOpen: isSubmitOpen, close: () => setIsSubmitOpen(false) },
+    { isOpen: isReportOpen, close: () => setIsReportOpen(false) },
+    { isOpen: showAboutModal, close: () => setShowAboutModal(false) },
+    { isOpen: !isRightCollapsed, close: () => setIsRightCollapsed(true) },
+  ]);
 
   // Synchronize UI panels with onboarding steps
   useEffect(() => {
@@ -8587,7 +8601,32 @@ function App() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-            onClick={() => setIsLightboxOpen(false)}
+            onClick={() => {
+              // A swipe should page images, not close the lightbox.
+              if (lightboxTouchRef.current.swiped) {
+                lightboxTouchRef.current.swiped = false;
+                return;
+              }
+              setIsLightboxOpen(false);
+            }}
+            onTouchStart={(e) => {
+              const t = e.touches[0];
+              lightboxTouchRef.current = { x: t.clientX, y: t.clientY, swiped: false };
+            }}
+            onTouchEnd={(e) => {
+              if (!activeAssets || activeAssets.length < 2) return;
+              const t = e.changedTouches[0];
+              const dx = t.clientX - lightboxTouchRef.current.x;
+              const dy = t.clientY - lightboxTouchRef.current.y;
+              if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) {
+                lightboxTouchRef.current.swiped = true;
+                if (dx < 0) {
+                  setActiveImageIndex(prev => (prev + 1) % activeAssets.length);
+                } else {
+                  setActiveImageIndex(prev => (prev - 1 + activeAssets.length) % activeAssets.length);
+                }
+              }
+            }}
             style={{ position: 'fixed', top: 0, left: 0, width: scrollbarWidth ? `calc(100vw - ${scrollbarWidth}px)` : '100vw', height: '100vh', background: 'rgba(0, 0, 0, 0.95)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, cursor: 'zoom-out', fontFamily: '"Space Mono", monospace' }}
           >
             <motion.button 
