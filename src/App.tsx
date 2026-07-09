@@ -846,6 +846,14 @@ const LAYER_CONFIG: Record<string, { color: string; icon: string }> = {
   'Default': { color: '#b6a6ff', icon: '/icons/icon-map-pin.svg' }
 };
 
+// Approximate transferred (gzipped) download a layer triggers, shown as an
+// on-brand badge on mobile so users on cellular can make an informed choice.
+// Only the layers with their own heavy dedicated chunk are flagged.
+const LAYER_DATA_WEIGHT: Record<string, string> = {
+  'UFOs - Sightings': '~0.7 MB',
+  'UFOs - Brazillian Archives': '~0.3 MB',
+};
+
 const matchParkName = (featName: string, targetName: string) => {
   if (!featName || !targetName) return false;
   const cleanFeat = featName.toLowerCase()
@@ -6625,16 +6633,30 @@ function App() {
                               alt={layerName} 
                             />
                           </div>
-                          <span style={{ 
-                            fontSize: '10px', 
+                          <span style={{
+                            fontSize: '10px',
                             lineHeight: '24px',
-                            fontWeight: isActive ? '700' : '400', 
-                            fontFamily: '"Space Mono", monospace', 
+                            fontWeight: isActive ? '700' : '400',
+                            fontFamily: '"Space Mono", monospace',
                             opacity: isActive ? 1 : 0.5,
                             transition: 'opacity 0.3s ease-in-out'
                           }}>
                             {toTitleCase(layerName)}
                           </span>
+                          {isMobile && LAYER_DATA_WEIGHT[layerName] && (
+                            <span style={{
+                              fontSize: '8px',
+                              letterSpacing: '0.08em',
+                              fontFamily: '"Space Mono", monospace',
+                              color: theme.textDim,
+                              border: `1px solid ${theme.borderLight}`,
+                              borderRadius: '3px',
+                              padding: '1px 5px',
+                              flexShrink: 0
+                            }}>
+                              {LAYER_DATA_WEIGHT[layerName]}
+                            </span>
+                          )}
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0' }} onClick={e => e.stopPropagation()}>
                           <motion.button 
