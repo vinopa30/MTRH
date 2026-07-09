@@ -6151,6 +6151,36 @@ function App() {
           <MobileTabBar currentPage={currentPage} setCurrentPage={setCurrentPage} theme={theme} />
         )}
 
+        {/* MOBILE FLOATING LAYERS BUTTON — opens the layers sheet on the map */}
+        {isMobile && currentPage === 'map' && isLeftCollapsed && (
+          <button
+            onClick={() => setIsLeftCollapsed(false)}
+            style={{
+              position: 'fixed',
+              left: '16px',
+              bottom: 'calc(56px + 16px + env(safe-area-inset-bottom, 0px))',
+              zIndex: 400,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '10px 16px',
+              borderRadius: '20px',
+              border: `1px solid ${theme.border}`,
+              background: theme.bgTransparent,
+              backdropFilter: 'blur(8px)',
+              color: theme.text,
+              fontFamily: '"Space Mono", monospace',
+              fontSize: '11px',
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              cursor: 'pointer'
+            }}
+          >
+            <img src="/icons/icon-filter.svg" style={{ width: '16px', height: '16px', filter: theme.invert }} alt="" />
+            LAYERS ({Object.values(activeLayers).filter(Boolean).length})
+          </button>
+        )}
+
         {/* CORE WORKSPACE FRAMING GRID — NOW FULL BLEED OVERLAY ENVIRONMENT */}
         <div style={{ flex: 1, position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
           {/* Map Overlay Panel */}
@@ -6212,28 +6242,50 @@ function App() {
             style={{ position: 'absolute', top: 0, right: 0, width: '20px', borderLeft: '1px solid', borderTop: '1px solid', zIndex: 100, pointerEvents: 'auto' }} 
           />
 
-          {/* LEFT COMPONENT: FILTERS MANAGEMENT PANEL */}
+          {/* LEFT COMPONENT: FILTERS PANEL (desktop drawer) / LAYERS SHEET (mobile full-screen) */}
           <motion.div
             className="custom-sidebar-scrollbar"
             initial={false}
-            animate={{
+            animate={isMobile ? {
+              x: isLeftCollapsed ? '-110%' : '0%',
+              background: theme.bg,
+              borderColor: theme.border,
+              opacity: 1
+            } : {
               left: isLeftCollapsed ? collapsedPanelOffset : 20,
               bottom: (isTimelineCollapsed ? 0 : 150) + tabBarOffset,
               background: theme.bg,
               borderColor: theme.border,
               opacity: 1
             }}
-            transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-            style={{
+            transition={{
+              x: { type: 'spring', stiffness: 320, damping: 34 },
+              default: { duration: 0.5, ease: [0.16, 1, 0.3, 1] }
+            }}
+            style={isMobile ? {
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              bottom: tabBarOffset,
+              width: '100%',
+              borderTop: '1px solid',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              zIndex: 45,
+              fontFamily: '"Space Mono", monospace',
+              pointerEvents: 'auto',
+              color: theme.text
+            } : {
               position: 'absolute',
               top: 0,
               width: `${sidePanelWidth}px`,
               borderRight: '1px solid',
               borderTop: '1px solid',
-              display: 'flex', 
-              flexDirection: 'column', 
-              overflow: 'visible', 
-              zIndex: 10, 
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'visible',
+              zIndex: 10,
               fontFamily: '"Space Mono", monospace',
               pointerEvents: 'auto',
               color: theme.text
@@ -6253,12 +6305,13 @@ function App() {
                 animation: 'radar-pulse 2s infinite'
               }} />
             )}
-            {/* ABSOLUTE POSITIONED FIXED BLACK TAB FOR LEFT SIDEBAR */}
-            <motion.button 
+            {/* ABSOLUTE POSITIONED FIXED BLACK TAB FOR LEFT SIDEBAR (desktop only) */}
+            <motion.button
               whileHover={{ opacity: 0.8 }}
               onClick={() => setIsLeftCollapsed(!isLeftCollapsed)}
               title={isLeftCollapsed ? "Maximize Filters" : "Minimize Filters"}
               style={{
+                display: isMobile ? 'none' : 'flex',
                 position: 'absolute',
                 top: '-1px',
                 right: '-20px',
@@ -6269,27 +6322,37 @@ function App() {
                 border: 'none',
                 cursor: 'pointer',
                 zIndex: 25,
-                display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 padding: 0
               }}
             >
-              <img 
-                src="/icons/icon-arrow-left.svg" 
-                alt="toggle" 
-                style={{ 
-                  width: '6px', 
-                  height: '12px', 
+              <img
+                src="/icons/icon-arrow-left.svg"
+                alt="toggle"
+                style={{
+                  width: '6px',
+                  height: '12px',
                   transform: isLeftCollapsed ? 'rotate(180deg)' : 'none',
                   filter: theme.invert
-                }} 
+                }}
               />
             </motion.button>
 
-            <div style={{ height: '40px', padding: '0 16px', borderBottom: `1px solid ${theme.border}`, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0', background: theme.bg, flexShrink: 0, zIndex: 20 }}>
-              <img src="/icons/icon-filter.svg" style={{ width: '30px', height: '30px', filter: theme.invert }} alt="filter" />
-              <span style={{ fontWeight: '700', fontSize: '20px', lineHeight: '24px', textTransform: 'uppercase', fontFamily: '"Space Mono", monospace' }}>FILTERS</span>
+            <div style={{ height: '40px', padding: '0 16px', borderBottom: `1px solid ${theme.border}`, display: 'flex', alignItems: 'center', justifyContent: isMobile ? 'space-between' : 'flex-end', gap: '0', background: theme.bg, flexShrink: 0, zIndex: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <img src="/icons/icon-filter.svg" style={{ width: '30px', height: '30px', filter: theme.invert }} alt="filter" />
+                <span style={{ fontWeight: '700', fontSize: '20px', lineHeight: '24px', textTransform: 'uppercase', fontFamily: '"Space Mono", monospace' }}>{isMobile ? 'LAYERS' : 'FILTERS'}</span>
+              </div>
+              {isMobile && (
+                <button
+                  onClick={() => setIsLeftCollapsed(true)}
+                  aria-label="Close layers"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '6px', color: theme.text, display: 'flex' }}
+                >
+                  <X size={18} strokeWidth={2.5} />
+                </button>
+              )}
             </div>
             
             <div style={{ padding: '16px', borderBottom: `1px solid ${theme.border}`, background: theme.bg, flexShrink: 0, zIndex: 100 }}>
