@@ -1,5 +1,5 @@
 // Mapping The Rabbit Hole App Component
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, Suspense, lazy } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, animate } from 'motion/react';
 import mapboxgl from 'mapbox-gl';
@@ -12,11 +12,17 @@ import { getAnalytics, isSupported } from 'firebase/analytics';
 // @ts-ignore
 import firebaseConfig from '../firebase-applet-config.json';
 
-import TimelinePage from './TimelinePage';
-import CodexPage from './CodexPage';
+import MobileTabBar from './mobile/MobileTabBar';
+import { useBackGesture } from './mobile/useBackGesture';
+
+// Code-split the Timeline and Codex pages: they mount on first visit (then stay
+// warm), so their code stays out of the critical-path bundle for the map.
+const TimelinePage = lazy(() => import('./TimelinePage'));
+const CodexPage = lazy(() => import('./CodexPage'));
 import { TIMELINE_ITEMS, TIMELINE_LOCATIONS, BIBLICAL_TRAVEL_PATHS, Waypoint, TravelPath } from './timelineData';
 // import { ARCHAEOLOGICAL_FINDS_DATA } from './archaeologyData';
-import { TERM_TREE_DATA } from './termTreeData';
+// termTreeData (~1.86MB) is loaded dynamically below so it stays out of the
+// main chunk; the Codex/Timeline lazy pages import it in their own chunks.
 // import { MISSING_411_DATA } from './missing411Data';
 // import { CAVES_DATA } from './cavesData';
 
@@ -588,7 +594,7 @@ const cleanAndProxyImageUrl = (url: any) => {
   );
 
   const isWiki = lowerUrl.includes('wikimedia.org') || lowerUrl.includes('wikipedia.org');
-  
+
   if (
     isWiki ||
     lowerUrl.includes('unsplash.com') ||
@@ -599,7 +605,7 @@ const cleanAndProxyImageUrl = (url: any) => {
     return trimmedUrl;
   }
 
-  // Route everything through our local server proxy, which is highly reliable, 
+  // Route everything through our local server proxy, which is highly reliable,
   // bypasses SameSite cookie limitations, and avoids rate limiting of public proxies.
   if (trimmedUrl.startsWith('http')) {
     return `/api/proxy-resource?url=${encodeURIComponent(trimmedUrl)}`;
@@ -841,6 +847,14 @@ const LAYER_CONFIG: Record<string, { color: string; icon: string }> = {
   'Default': { color: '#b6a6ff', icon: '/icons/icon-map-pin.svg' }
 };
 
+// Approximate transferred (gzipped) download a layer triggers, shown as an
+// on-brand badge on mobile so users on cellular can make an informed choice.
+// Only the layers with their own heavy dedicated chunk are flagged.
+const LAYER_DATA_WEIGHT: Record<string, string> = {
+  'UFOs - Sightings': '~0.7 MB',
+  'UFOs - Brazillian Archives': '~0.3 MB',
+};
+
 const matchParkName = (featName: string, targetName: string) => {
   if (!featName || !targetName) return false;
   const cleanFeat = featName.toLowerCase()
@@ -946,6 +960,9 @@ function App() {
   const [pointsAndLinesData, setPointsAndLinesData] = useState<any[]>([]);
   const [rabbitHoleData, setRabbitHoleData] = useState<any[]>([]);
   const [ufoData, setUfoData] = useState<any[]>([]);
+  // Tracks which UFO dataset chunks have been (or are being) loaded so each
+  // layer only pulls its own files, and never twice.
+  const loadedUfoChunksRef = useRef<Set<string>>(new Set());
   const [archaeologyData, setArchaeologyData] = useState<any[]>([]);
   const [missing411Data, setMissing411Data] = useState<any[]>([]);
   const [cavesData, setCavesData] = useState<any[]>([]);
@@ -964,6 +981,20 @@ function App() {
     if (path.startsWith('/codex')) return 'codex';
     return 'map';
   });
+  // Mount Timeline/Codex on first visit, then keep them warm — pairs with the
+  // React.lazy imports so neither page's chunk loads until it's actually opened.
+  const [mountedPages, setMountedPages] = useState<{ timeline: boolean; codex: boolean }>(() => {
+    const path = window.location.pathname.toLowerCase();
+    return {
+      timeline: path.startsWith('/timeline'),
+      codex: path.startsWith('/codex'),
+    };
+  });
+  useEffect(() => {
+    if (currentPage === 'timeline' || currentPage === 'codex') {
+      setMountedPages(prev => (prev[currentPage] ? prev : { ...prev, [currentPage]: true }));
+    }
+  }, [currentPage]);
   const [selectedTimelineItem, setSelectedTimelineItem] = useState<any | null>(null);
   const [activeWaypointIndex, setActiveWaypointIndex] = useState<number | null>(null);
 
@@ -1077,6 +1108,20 @@ function App() {
 
   combinedDataRef.current = combinedPointsAndLinesData;
 
+  // The Codex term tree, loaded off the critical path (see deferred effect below).
+  const [termTreeData, setTermTreeData] = useState<any[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => import('./termTreeData').then(m => { if (!cancelled) setTermTreeData(m.TERM_TREE_DATA as any[]); });
+    const ric: any = (window as any).requestIdleCallback;
+    const handle = ric ? ric(load) : setTimeout(load, 200);
+    return () => {
+      cancelled = true;
+      const cancel: any = (window as any).cancelIdleCallback;
+      if (ric && cancel) cancel(handle); else clearTimeout(handle as any);
+    };
+  }, []);
+
   // Combine static Codex nodes and approved user Codex submissions
   const combinedCodexNodes = useMemo(() => {
     const approvedCodexSubmissions = approvedSubmissions.filter(item => 
@@ -1090,7 +1135,7 @@ function App() {
       sources: item.source ? [item.source] : [],
       layer: item.category || undefined
     }));
-    const rawNodes = [...TERM_TREE_DATA, ...approvedCodexSubmissions];
+    const rawNodes = [...termTreeData, ...approvedCodexSubmissions];
     return rawNodes.map((node: any) => {
       const override = overrides[String(node.id)];
       if (override) {
@@ -1101,7 +1146,12 @@ function App() {
       }
       return node;
     });
-  }, [approvedSubmissions, overrides]);
+  }, [termTreeData, approvedSubmissions, overrides]);
+
+  // Latest combined nodes for handlers that run outside React's render (e.g.
+  // the popstate URL sync), so a codex deep-link resolves once the tree loads.
+  const combinedCodexNodesRef = useRef<any[]>([]);
+  combinedCodexNodesRef.current = combinedCodexNodes;
 
   // Combine static Timeline items and approved user Timeline submissions
   const combinedTimelineItems = useMemo(() => {
@@ -1290,6 +1340,12 @@ function App() {
   const [isTimelineDragging, setIsTimelineDragging] = useState(false);
   const [dragStartX, setDragStartX] = useState(0);
   const [dragStartTimelineStart, setDragStartTimelineStart] = useState(0);
+  // Refs mirror the drag state so pointer-move reads current values immediately
+  // (state updates lag a render, which dropped the first touch-move and made the
+  // scrubber feel unresponsive).
+  const isTimelineDraggingRef = useRef(false);
+  const dragStartXRef = useRef(0);
+  const dragStartTimelineStartRef = useRef(0);
   const timelineRef = useRef<HTMLDivElement>(null);
   
   const [selectedFeature, setSelectedFeature] = useState<any>(null);
@@ -1372,6 +1428,15 @@ function App() {
   const [isStyleLoaded, setIsStyleLoaded] = useState(false);
   const [windowWidth, setWindowWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 1200);
   const [scrollbarWidth, setScrollbarWidth] = useState(0);
+  // Mobile layout gate — same threshold the old "Optimized for Desktop"
+  // blocker used, now driving an adapted layout instead of a wall.
+  const isMobile = windowWidth < 1024;
+  // Side panels shrink to the viewport on phones; collapsed offset leaves the
+  // 20px toggle tab visible. All values numeric so Motion can interpolate.
+  const sidePanelWidth = isMobile ? Math.min(300, windowWidth - 40) : 300;
+  const collapsedPanelOffset = -(sidePanelWidth - 20);
+  // Everything bottom-anchored sits above the mobile tab bar.
+  const tabBarOffset = isMobile ? 40 : 0;
   const [selectedCodexNode, setSelectedCodexNode] = useState<any>(null);
 
   // Submission Form State
@@ -2936,9 +3001,14 @@ function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const [isLeftCollapsed, setIsLeftCollapsed] = useState(false);
+  // On phones the filter panel and timeline bar start collapsed so the map
+  // owns the screen; a pin tap still slides the dossier open.
+  const [isLeftCollapsed, setIsLeftCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 1024);
   const [isRightCollapsed, setIsRightCollapsed] = useState(true);
-  const [isTimelineCollapsed, setIsTimelineCollapsed] = useState(false);
+  const [isTimelineCollapsed, setIsTimelineCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 1024);
+  // Mobile dossier bottom-sheet snap height; drag handle toggles/dismisses it.
+  const [mobileSheetSnap, setMobileSheetSnap] = useState<'half' | 'full'>('half');
+  const sheetDragStartRef = useRef<{ y: number; moved: boolean }>({ y: 0, moved: false });
   const [hoveredBucket, setHoveredBucket] = useState<{
     count: number;
     cat: string;
@@ -3007,7 +3077,7 @@ function App() {
         setIsModeratorOpen(false);
         const termId = params.get('termId');
         if (termId) {
-          const matched = TERM_TREE_DATA.find(node => String(node.id) === termId);
+          const matched = combinedCodexNodesRef.current.find(node => String(node.id) === termId);
           if (matched) setSelectedCodexNode(matched);
         } else {
           setSelectedCodexNode(null);
@@ -3093,7 +3163,18 @@ function App() {
 
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
-  
+  // Tracks a touch on the lightbox so a horizontal swipe pages images (and is
+  // not misread as a tap-to-close on the backdrop).
+  const lightboxTouchRef = useRef<{ x: number; y: number; swiped: boolean }>({ x: 0, y: 0, swiped: false });
+  // Pinch-to-zoom state for the lightbox image (mobile).
+  const [lbZoom, setLbZoom] = useState<{ scale: number; tx: number; ty: number }>({ scale: 1, tx: 0, ty: 0 });
+  const lbPointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const lbPinchRef = useRef<{ dist: number; startScale: number } | null>(null);
+  const lbZoomedRef = useRef(false);
+  useEffect(() => { lbZoomedRef.current = lbZoom.scale > 1.01; }, [lbZoom.scale]);
+  // Reset zoom whenever the image changes or the lightbox closes.
+  useEffect(() => { setLbZoom({ scale: 1, tx: 0, ty: 0 }); }, [activeImageIndex, isLightboxOpen]);
+
   const activeAssets = useMemo(() => {
     return getCombinedAssets(selectedFeature?.images || []);
   }, [selectedFeature]);
@@ -3154,15 +3235,28 @@ function App() {
     return () => clearTimeout(fallbackTimeout);
   }, [isMapLoaded, isDataCompiled, isLiveLoading]);
 
-  // Onboarding Tour Trigger (after entering About Modal or manually requested)
+  // Onboarding Tour Trigger (after entering About Modal or manually requested).
+  // Suppressed on mobile: the tour's tooltips anchor to fixed desktop pixel
+  // positions and would point at nothing on a phone layout.
   useEffect(() => {
-    if (!showAboutModal && !isLiveLoading) {
+    if (!showAboutModal && !isLiveLoading && !isMobile) {
       const completed = localStorage.getItem('mtrh_onboarding_completed');
       if (!completed) {
         setOnboardingStep(0);
       }
     }
-  }, [showAboutModal, isLiveLoading]);
+  }, [showAboutModal, isLiveLoading, isMobile]);
+
+  // On mobile, route the system back gesture through open overlays (top-most
+  // first) so it closes them instead of leaving the site.
+  useBackGesture(isMobile, [
+    { isOpen: isLightboxOpen, close: () => setIsLightboxOpen(false) },
+    { isOpen: isSubmitOpen, close: () => setIsSubmitOpen(false) },
+    { isOpen: isReportOpen, close: () => setIsReportOpen(false) },
+    { isOpen: showAboutModal, close: () => setShowAboutModal(false) },
+    { isOpen: !isLeftCollapsed, close: () => setIsLeftCollapsed(true) },
+    { isOpen: !isRightCollapsed, close: () => setIsRightCollapsed(true) },
+  ]);
 
   // Synchronize UI panels with onboarding steps
   useEffect(() => {
@@ -3663,28 +3757,48 @@ function App() {
   // Dynamically load datasets on demand based on active layers
   useEffect(() => {
     const loadDatasets = async () => {
-      // 1. UFO Datasets
-      const hasUfoActive = activeLayers['UFOs - War.gov'] || activeLayers['UFOs - Brazillian Archives'] || activeLayers['UFOs - Sightings'] || activeLayers['Secret Government Programs'];
-      if (hasUfoActive && ufoData.length === 0) {
-        try {
-          const [ufo1, ufo2, war1, war2, war3, br] = await Promise.all([
-            import('./ufoData-1.json'),
-            import('./ufoData-2.json'),
-            import('./warGovData.json'),
-            import('./warGovData-2.json'),
-            import('./warGovData-3.json'),
-            import('./brazilianUfoData.json')
-          ]);
-          setUfoData([
-            ...getSafeData(ufo1),
-            ...getSafeData(ufo2),
-            ...getSafeData(war1),
-            ...getSafeData(war2),
-            ...getSafeData(war3),
-            ...getSafeData(br)
-          ]);
-        } catch (err) {
-          console.error("Failed to load UFO datasets:", err);
+      // 1. UFO Datasets — loaded per layer instead of as one ~5.9MB bundle, so
+      // toggling e.g. Brazillian Archives no longer downloads every UFO file.
+      const ufoSources: { key: string; active: boolean; load: () => Promise<any[]> }[] = [
+        {
+          key: 'sightings', // records normalize to 'UFOs - Sightings'
+          active: !!activeLayers['UFOs - Sightings'],
+          load: async () => {
+            const [a, b] = await Promise.all([
+              import('./ufoData-1.json'),
+              import('./ufoData-2.json')
+            ]);
+            return [...getSafeData(a), ...getSafeData(b)];
+          }
+        },
+        {
+          key: 'wargov', // records normalize to 'UFOs - War.gov'
+          active: !!(activeLayers['UFOs - War.gov'] || activeLayers['Secret Government Programs']),
+          load: async () => {
+            const [a, b, c] = await Promise.all([
+              import('./warGovData.json'),
+              import('./warGovData-2.json'),
+              import('./warGovData-3.json')
+            ]);
+            return [...getSafeData(a), ...getSafeData(b), ...getSafeData(c)];
+          }
+        },
+        {
+          key: 'brazilian',
+          active: !!activeLayers['UFOs - Brazillian Archives'],
+          load: async () => getSafeData(await import('./brazilianUfoData.json'))
+        }
+      ];
+      for (const source of ufoSources) {
+        if (source.active && !loadedUfoChunksRef.current.has(source.key)) {
+          loadedUfoChunksRef.current.add(source.key);
+          try {
+            const records = await source.load();
+            setUfoData(prev => [...prev, ...records]);
+          } catch (err) {
+            loadedUfoChunksRef.current.delete(source.key);
+            console.error(`Failed to load UFO dataset chunk "${source.key}":`, err);
+          }
         }
       }
 
@@ -3866,15 +3980,17 @@ function App() {
     };
 
     compileVerifiedIntel();
-  }, [rabbitHoleData, ufoData, archaeologyData, missing411Data, cavesData, alienAbductionData, cattleMutilationData, overrides]);
+  }, [rabbitHoleData, ufoData, archaeologyData, missing411Data, cavesData, alienAbductionData, cattleMutilationData, overrides, combinedCodexNodes]);
 
   useEffect(() => {
     if (uniqueCategories.length > 0 && !hasRandomizedRef.current) {
       hasRandomizedRef.current = true;
-      const count = Math.floor(Math.random() * 3) + 4; // Choose 4, 5, or 6 layers
-      const shuffled = [...uniqueCategories].sort(() => 0.5 - Math.random());
-      const selected = shuffled.slice(0, count);
-      
+      // Curated, deterministic boot layers. The old random 4-6 pick meant a
+      // ~50% chance of downloading the multi-MB UFO datasets on first paint;
+      // the shuffle button still offers the random dive on demand.
+      const CURATED_INITIAL_LAYERS = ['Megaliths / Structures', 'Cryptid Sightings', 'D.U.M.B.\'s', 'Crop Circles'];
+      const selected = CURATED_INITIAL_LAYERS.filter(cat => uniqueCategories.includes(cat));
+
       const initialActive: Record<string, boolean> = {};
       uniqueCategories.forEach(cat => {
         initialActive[cat] = selected.includes(cat);
@@ -4161,14 +4277,21 @@ function App() {
     const urlLng = parseFloat(urlParams.get('lng') || '');
     const urlZoom = parseFloat(urlParams.get('zoom') || '');
 
+    const isTouchViewport = typeof window !== 'undefined' && window.innerWidth < 1024;
     const map = new mapboxgl.Map({
       container: mapContainer.current,
-      style: isMapDarkMode ? MAP_STYLE_DARK : MAP_STYLE_LIGHT, 
-      center: (!isNaN(urlLat) && !isNaN(urlLng)) ? [urlLng, urlLat] : [-98.5795, 39.8283], 
+      style: isMapDarkMode ? MAP_STYLE_DARK : MAP_STYLE_LIGHT,
+      center: (!isNaN(urlLat) && !isNaN(urlLng)) ? [urlLng, urlLat] : [-98.5795, 39.8283],
       zoom: !isNaN(urlZoom) ? urlZoom : 4.0,
       projection: { name: 'globe' } as any,
-      trackResize: true
+      trackResize: true,
+      // On touch, disable rotate/pitch so one-finger pan and pinch-zoom don't
+      // fight an accidental two-finger rotation; keeps the map gesture model simple.
+      ...(isTouchViewport ? { dragRotate: false, pitchWithRotate: false, touchPitch: false } : {})
     });
+    if (isTouchViewport) {
+      map.touchZoomRotate.disableRotation();
+    }
     mapRef.current = map;
 
     // Stop main map rotation on any user interaction
@@ -4894,6 +5017,7 @@ function App() {
 
     setSelectedFeature(feature);
     setIsRightCollapsed(false);
+    setMobileSheetSnap('half'); // open the mobile sheet at peek height
     setActiveWaypointIndex(null);
 
     // Auto-expand the categories this location belongs to in the sidebar
@@ -5714,48 +5838,6 @@ function App() {
   return (
     <div style={{ width: scrollbarWidth ? `calc(100vw - ${scrollbarWidth}px)` : '100vw', minHeight: '100vh', background: '#ffffff', color: '#000000', fontFamily: '"Space Mono", monospace', overflowX: 'hidden', textAlign: 'left' }}>
       
-      {/* MOBILE BLOCKER OVERLAY */}
-      <AnimatePresence>
-        {windowWidth < 1024 && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              width: scrollbarWidth ? `calc(100vw - ${scrollbarWidth}px)` : '100vw',
-              height: '100vh',
-              background: '#000000',
-              zIndex: 1000000,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '40px',
-              textAlign: 'center',
-              color: '#ffffff'
-            }}
-          >
-            <div style={{ padding: '0', maxWidth: '400px', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px' }}>
-              <img 
-                src="https://raw.githubusercontent.com/northbeastclothing-design/MTRH/main/public/mtrh-square-white.svg" 
-                alt="MTRH Logo" 
-                style={{ width: '120px' }} 
-              />
-              <div style={{ width: '40px', height: '1px', background: '#fff' }} />
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <span style={{ fontSize: '11px', fontWeight: 'bold', letterSpacing: '2px', textTransform: 'uppercase' }}>Optimized for Desktop</span>
-                <p style={{ fontSize: '11px', lineHeight: '20px', color: '#a3a3a3', margin: 0 }}>
-                  To provide the best experience for exploring our archives and interactive mapping tools, please visit MTRH on a desktop computer.
-                </p>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* GLOBAL FULL-SCREEN LOADER OVERLAY */}
       <AnimatePresence>
         {(isInitialLoad && isLiveLoading) && (
@@ -5791,12 +5873,17 @@ function App() {
         )}
       </AnimatePresence>
 
-      <div 
-        style={{ 
-          height: '100vh', 
-          display: 'flex', 
-          flexDirection: 'column', 
-          position: 'relative', 
+      <div
+        style={{
+          // Use the dynamic viewport height on mobile so the app fills exactly
+          // the visible area — 100vh on iOS Safari is taller than what's visible
+          // (it ignores the URL bar), which caused the whole page to scroll and
+          // drag the header off-screen. 100dvh keeps the header pinned at the top
+          // and the date ruler/controls pinned at the bottom.
+          height: isMobile ? '100dvh' : '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          position: 'relative',
           overflow: 'hidden',
           background: isMapDarkMode ? '#000000' : '#ffffff',
           transition: 'background-color 0.3s ease'
@@ -5843,24 +5930,28 @@ function App() {
 
         </motion.div>
 
-        {/* BRAND HEADER COMPONENT */}
-        <header 
-          style={{ 
-            height: '118px', 
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'space-between', 
-            padding: '0 20px 0 0', 
-            flexShrink: 0, 
-            zIndex: 20, 
-            pointerEvents: 'none', 
+        {/* BRAND HEADER COMPONENT — compact on mobile, nav pill replaced by the bottom tab bar */}
+        <header
+          style={{
+            height: isMobile ? '48px' : '118px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '0 20px 0 0',
+            flexShrink: 0,
+            zIndex: 20,
+            pointerEvents: 'none',
             position: 'relative',
-            background: (currentPage === 'map' || currentPage === 'codex' || currentPage === 'timeline') ? 'transparent' : (isMapDarkMode ? '#000000' : '#ffffff'),
+            // Keep the map header transparent (full-bleed map); give timeline/codex
+            // a solid header on mobile so it's a clean bar, not a gray map void.
+            background: (isMobile && (currentPage === 'codex' || currentPage === 'timeline'))
+              ? theme.bg
+              : ((currentPage === 'map' || currentPage === 'codex' || currentPage === 'timeline') ? 'transparent' : (isMapDarkMode ? '#000000' : '#ffffff')),
             transition: 'background-color 0.3s ease'
           }}
         >
-          <img src="/mtrh-horiz-words.svg" alt="MTRH Logo" style={{ height: '78px', width: '232px', pointerEvents: 'auto', filter: theme.invert }} />
-          
+          <img src="/mtrh-horiz-words.svg" alt="MTRH Logo" style={{ height: isMobile ? '36px' : '78px', width: isMobile ? '107px' : '232px', pointerEvents: 'auto', filter: theme.invert }} />
+
           {/* CENTER NAVIGATION PILL */}
           <div style={{
             position: 'absolute',
@@ -5868,7 +5959,7 @@ function App() {
             transform: 'translateX(-50%)',
             pointerEvents: 'auto',
             zIndex: 30,
-            display: 'flex',
+            display: isMobile ? 'none' : 'flex',
             gap: '8px',
             border: `1px solid ${theme.border}`,
             padding: '4px',
@@ -5983,13 +6074,14 @@ function App() {
             </div>
           </div>
 
-          {/* THEME TOGGLE: FIXED TO RIGHT */}
-          <div style={{ pointerEvents: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+          {/* THEME TOGGLE: FIXED TO RIGHT — single row on mobile to fit the 48px header */}
+          <div style={{ pointerEvents: 'auto', display: 'flex', flexDirection: isMobile ? 'row' : 'column', alignItems: isMobile ? 'center' : 'flex-end', gap: '8px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ 
-                fontSize: '9px', 
-                fontFamily: '"Space Mono", monospace', 
-                fontWeight: 700, 
+              <span style={{
+                display: isMobile ? 'none' : 'inline',
+                fontSize: '9px',
+                fontFamily: '"Space Mono", monospace',
+                fontWeight: 700,
                 color: theme.text,
                 letterSpacing: '1px'
               }}>
@@ -6106,6 +6198,53 @@ function App() {
           </div>
         </header>
 
+        {/* MOBILE BOTTOM TAB BAR — replaces the header nav pill below 1024px */}
+        {isMobile && (
+          <MobileTabBar currentPage={currentPage} setCurrentPage={setCurrentPage} theme={theme} />
+        )}
+
+        {/* MOBILE FLOATING LAYERS BUTTON — toggles the layers sheet. When open it
+            slides 2/3 off to the left leaving a caret pull-tab; tapping it closes
+            the sheet and slides the button back out. */}
+        {isMobile && currentPage === 'map' && (
+          <motion.button
+            onClick={() => setIsLeftCollapsed(v => !v)}
+            initial={false}
+            animate={{
+              x: isLeftCollapsed ? 0 : '-66%',
+              // Ride up above the map timeline scrubber (150px) when it opens.
+              y: isTimelineCollapsed ? 0 : -150
+            }}
+            transition={{ type: 'spring', stiffness: 320, damping: 34 }}
+            style={{
+              position: 'fixed',
+              left: '16px',
+              bottom: 'calc(40px + 16px + min(env(safe-area-inset-bottom, 0px), 8px))',
+              zIndex: 400,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '10px 16px',
+              borderRadius: '20px',
+              border: `1px solid ${theme.border}`,
+              background: theme.bgTransparent,
+              backdropFilter: 'blur(8px)',
+              color: theme.text,
+              fontFamily: '"Space Mono", monospace',
+              fontSize: '11px',
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            <img src="/icons/icon-filter.svg" style={{ width: '16px', height: '16px', filter: theme.invert }} alt="" />
+            LAYERS ({Object.values(activeLayers).filter(Boolean).length})
+            {/* Caret pull-tab: the part left visible when the button is slid off */}
+            <span style={{ fontSize: '14px', lineHeight: 1, paddingLeft: '2px' }}>{isLeftCollapsed ? '' : '›'}</span>
+          </motion.button>
+        )}
+
         {/* CORE WORKSPACE FRAMING GRID — NOW FULL BLEED OVERLAY ENVIRONMENT */}
         <div style={{ flex: 1, position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
           {/* Map Overlay Panel */}
@@ -6145,50 +6284,75 @@ function App() {
             }} />
           )}
           
-          {/* PROTECTIVE SIDE STRIPS */}
-          <motion.div 
+          {/* PROTECTIVE SIDE STRIPS — desktop only; they frame the collapsed
+              panel edge-tabs, which don't exist in the mobile full-width sheets. */}
+          {!isMobile && (<>
+          <motion.div
             initial={false}
-            animate={{ 
+            animate={{
               bottom: isTimelineCollapsed ? '0px' : '150px',
               background: theme.bg,
               borderColor: theme.border
             }}
             transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-            style={{ position: 'absolute', top: 0, left: 0, width: '20px', borderRight: '1px solid', borderTop: '1px solid', zIndex: 100, pointerEvents: 'auto' }} 
+            style={{ position: 'absolute', top: 0, left: 0, width: '20px', borderRight: '1px solid', borderTop: '1px solid', zIndex: 100, pointerEvents: 'auto' }}
           />
-          <motion.div 
+          <motion.div
             initial={false}
-            animate={{ 
+            animate={{
               bottom: isTimelineCollapsed ? '0px' : '150px',
               background: theme.bg,
               borderColor: theme.border
             }}
             transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-            style={{ position: 'absolute', top: 0, right: 0, width: '20px', borderLeft: '1px solid', borderTop: '1px solid', zIndex: 100, pointerEvents: 'auto' }} 
+            style={{ position: 'absolute', top: 0, right: 0, width: '20px', borderLeft: '1px solid', borderTop: '1px solid', zIndex: 100, pointerEvents: 'auto' }}
           />
+          </>)}
 
-          {/* LEFT COMPONENT: FILTERS MANAGEMENT PANEL */}
-          <motion.div 
+          {/* LEFT COMPONENT: FILTERS PANEL (desktop drawer) / LAYERS SHEET (mobile full-screen) */}
+          <motion.div
             className="custom-sidebar-scrollbar"
             initial={false}
-            animate={{ 
-              left: isLeftCollapsed ? -280 : 20,
-              bottom: isTimelineCollapsed ? 0 : 150,
+            animate={isMobile ? {
+              x: isLeftCollapsed ? '-110%' : '0%',
+              background: theme.bg,
+              borderColor: theme.border,
+              opacity: 1
+            } : {
+              left: isLeftCollapsed ? collapsedPanelOffset : 20,
+              bottom: (isTimelineCollapsed ? 0 : 150) + tabBarOffset,
               background: theme.bg,
               borderColor: theme.border,
               opacity: 1
             }}
-            transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-            style={{ 
+            transition={{
+              x: { type: 'spring', stiffness: 320, damping: 34 },
+              default: { duration: 0.5, ease: [0.16, 1, 0.3, 1] }
+            }}
+            style={isMobile ? {
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              bottom: tabBarOffset,
+              width: '100%',
+              borderTop: '1px solid',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              zIndex: 45,
+              fontFamily: '"Space Mono", monospace',
+              pointerEvents: 'auto',
+              color: theme.text
+            } : {
               position: 'absolute',
               top: 0,
-              width: '300px', 
+              width: `${sidePanelWidth}px`,
               borderRight: '1px solid',
               borderTop: '1px solid',
-              display: 'flex', 
-              flexDirection: 'column', 
-              overflow: 'visible', 
-              zIndex: 10, 
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'visible',
+              zIndex: 10,
               fontFamily: '"Space Mono", monospace',
               pointerEvents: 'auto',
               color: theme.text
@@ -6208,12 +6372,13 @@ function App() {
                 animation: 'radar-pulse 2s infinite'
               }} />
             )}
-            {/* ABSOLUTE POSITIONED FIXED BLACK TAB FOR LEFT SIDEBAR */}
-            <motion.button 
+            {/* ABSOLUTE POSITIONED FIXED BLACK TAB FOR LEFT SIDEBAR (desktop only) */}
+            <motion.button
               whileHover={{ opacity: 0.8 }}
               onClick={() => setIsLeftCollapsed(!isLeftCollapsed)}
               title={isLeftCollapsed ? "Maximize Filters" : "Minimize Filters"}
               style={{
+                display: isMobile ? 'none' : 'flex',
                 position: 'absolute',
                 top: '-1px',
                 right: '-20px',
@@ -6224,27 +6389,37 @@ function App() {
                 border: 'none',
                 cursor: 'pointer',
                 zIndex: 25,
-                display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 padding: 0
               }}
             >
-              <img 
-                src="/icons/icon-arrow-left.svg" 
-                alt="toggle" 
-                style={{ 
-                  width: '6px', 
-                  height: '12px', 
+              <img
+                src="/icons/icon-arrow-left.svg"
+                alt="toggle"
+                style={{
+                  width: '6px',
+                  height: '12px',
                   transform: isLeftCollapsed ? 'rotate(180deg)' : 'none',
                   filter: theme.invert
-                }} 
+                }}
               />
             </motion.button>
 
-            <div style={{ height: '40px', padding: '0 16px', borderBottom: `1px solid ${theme.border}`, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0', background: theme.bg, flexShrink: 0, zIndex: 20 }}>
-              <img src="/icons/icon-filter.svg" style={{ width: '30px', height: '30px', filter: theme.invert }} alt="filter" />
-              <span style={{ fontWeight: '700', fontSize: '20px', lineHeight: '24px', textTransform: 'uppercase', fontFamily: '"Space Mono", monospace' }}>FILTERS</span>
+            <div style={{ height: '40px', padding: '0 16px', borderBottom: `1px solid ${theme.border}`, display: 'flex', alignItems: 'center', justifyContent: isMobile ? 'space-between' : 'flex-end', gap: '0', background: theme.bg, flexShrink: 0, zIndex: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <img src="/icons/icon-filter.svg" style={{ width: '30px', height: '30px', filter: theme.invert }} alt="filter" />
+                <span style={{ fontWeight: '700', fontSize: '20px', lineHeight: '24px', textTransform: 'uppercase', fontFamily: '"Space Mono", monospace' }}>{isMobile ? 'LAYERS' : 'FILTERS'}</span>
+              </div>
+              {isMobile && (
+                <button
+                  onClick={() => setIsLeftCollapsed(true)}
+                  aria-label="Close layers"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '6px', color: theme.text, display: 'flex' }}
+                >
+                  <X size={18} strokeWidth={2.5} />
+                </button>
+              )}
             </div>
             
             <div style={{ padding: '16px', borderBottom: `1px solid ${theme.border}`, background: theme.bg, flexShrink: 0, zIndex: 100 }}>
@@ -6508,16 +6683,30 @@ function App() {
                               alt={layerName} 
                             />
                           </div>
-                          <span style={{ 
-                            fontSize: '10px', 
+                          <span style={{
+                            fontSize: '10px',
                             lineHeight: '24px',
-                            fontWeight: isActive ? '700' : '400', 
-                            fontFamily: '"Space Mono", monospace', 
+                            fontWeight: isActive ? '700' : '400',
+                            fontFamily: '"Space Mono", monospace',
                             opacity: isActive ? 1 : 0.5,
                             transition: 'opacity 0.3s ease-in-out'
                           }}>
                             {toTitleCase(layerName)}
                           </span>
+                          {isMobile && LAYER_DATA_WEIGHT[layerName] && (
+                            <span style={{
+                              fontSize: '8px',
+                              letterSpacing: '0.08em',
+                              fontFamily: '"Space Mono", monospace',
+                              color: theme.textDim,
+                              border: `1px solid ${theme.borderLight}`,
+                              borderRadius: '3px',
+                              padding: '1px 5px',
+                              flexShrink: 0
+                            }}>
+                              {LAYER_DATA_WEIGHT[layerName]}
+                            </span>
+                          )}
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0' }} onClick={e => e.stopPropagation()}>
                           <motion.button 
@@ -6774,30 +6963,54 @@ function App() {
             </div>
           </motion.div>
 
-          {/* RIGHT COMPONENT: DOSSIER SIDEBAR WINDOW PANEL */}
-          <motion.div 
+          {/* RIGHT COMPONENT: DOSSIER SIDEBAR (desktop) / BOTTOM SHEET (mobile) */}
+          <motion.div
             initial={false}
-            animate={{ 
-              right: isRightCollapsed ? -280 : 20,
-              bottom: isTimelineCollapsed ? 0 : 150,
+            animate={isMobile ? {
+              y: isRightCollapsed ? '110%' : '0%',
+              height: mobileSheetSnap === 'full' ? '90vh' : '52vh',
+              background: theme.bg,
+              borderColor: theme.border,
+              opacity: 1
+            } : {
+              right: isRightCollapsed ? collapsedPanelOffset : 20,
+              bottom: (isTimelineCollapsed ? 0 : 150) + tabBarOffset,
               background: theme.bg,
               borderColor: theme.border,
               opacity: 1
             }}
-            transition={{ 
+            transition={{
               right: { type: 'spring', stiffness: 240, damping: 28 },
+              y: { type: 'spring', stiffness: 320, damping: 34 },
               default: { duration: 0.5, ease: [0.16, 1, 0.3, 1] }
             }}
-            style={{ 
+            style={isMobile ? {
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              bottom: tabBarOffset,
+              width: '100%',
+              borderTop: '1px solid',
+              borderTopLeftRadius: '16px',
+              borderTopRightRadius: '16px',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              zIndex: 40,
+              fontFamily: '"Space Mono", monospace',
+              pointerEvents: 'auto',
+              color: theme.text,
+              boxShadow: '0 -8px 24px rgba(0,0,0,0.35)'
+            } : {
               position: 'absolute',
               top: 0,
-              width: '300px',
+              width: `${sidePanelWidth}px`,
               borderLeft: '1px solid',
               borderTop: '1px solid',
-              display: 'flex', 
-              flexDirection: 'column', 
-              overflow: 'visible', 
-              zIndex: 10, 
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'visible',
+              zIndex: 10,
               fontFamily: '"Space Mono", monospace',
               pointerEvents: 'auto',
               color: theme.text
@@ -6818,12 +7031,56 @@ function App() {
               }} />
             )}
             
-            {/* ABSOLUTE POSITIONED FIXED BLACK TAB FOR RIGHT SIDEBAR */}
-            <motion.button 
+            {/* MOBILE DRAG HANDLE — tap toggles half/full, drag down shrinks/dismisses, up expands */}
+            {isMobile && (
+              <div
+                onPointerDown={(e) => {
+                  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                  sheetDragStartRef.current = { y: e.clientY, moved: false };
+                }}
+                onPointerMove={(e) => {
+                  if (Math.abs(e.clientY - sheetDragStartRef.current.y) > 6) sheetDragStartRef.current.moved = true;
+                }}
+                onPointerUp={(e) => {
+                  const dy = e.clientY - sheetDragStartRef.current.y;
+                  if (!sheetDragStartRef.current.moved) {
+                    // Tap: cycle snap height.
+                    setMobileSheetSnap(prev => (prev === 'half' ? 'full' : 'half'));
+                  } else if (dy > 70) {
+                    // Drag down: collapse from half, or step full -> half.
+                    if (mobileSheetSnap === 'full') setMobileSheetSnap('half');
+                    else setIsRightCollapsed(true);
+                  } else if (dy < -70) {
+                    setMobileSheetSnap('full');
+                  }
+                }}
+                style={{
+                  flexShrink: 0,
+                  height: '34px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '4px',
+                  cursor: 'grab',
+                  touchAction: 'none',
+                  background: theme.bg,
+                  borderTopLeftRadius: '16px',
+                  borderTopRightRadius: '16px'
+                }}
+              >
+                <div style={{ width: '40px', height: '4px', borderRadius: '2px', background: theme.textDim }} />
+                <span style={{ fontSize: '7.5px', letterSpacing: '0.3em', color: theme.textDim }}>— CASE FILE —</span>
+              </div>
+            )}
+
+            {/* ABSOLUTE POSITIONED FIXED BLACK TAB FOR RIGHT SIDEBAR (desktop only) */}
+            <motion.button
               whileHover={{ opacity: 0.8 }}
               onClick={() => setIsRightCollapsed(!isRightCollapsed)}
               title={isRightCollapsed ? "Maximize Dossier" : "Minimize Dossier"}
               style={{
+                display: isMobile ? 'none' : 'flex',
                 position: 'absolute',
                 top: '-1px',
                 left: '-20px',
@@ -6834,7 +7091,6 @@ function App() {
                 border: 'none',
                 cursor: 'pointer',
                 zIndex: 25,
-                display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 padding: 0
@@ -7751,10 +8007,10 @@ function App() {
           </motion.div>
 
           {/* HORIZONTAL COMPONENT: TIMELINE CONTROLS AS FLOATING ABSOLUTE OVERLAY */}
-          <motion.div 
+          <motion.div
             initial={false}
-            animate={{ 
-              bottom: isTimelineCollapsed ? -150 : 0,
+            animate={{
+              bottom: (isTimelineCollapsed ? -150 : 0) + tabBarOffset,
               background: theme.bg,
               borderColor: theme.border
             }}
@@ -7919,19 +8175,25 @@ function App() {
               />
             </motion.button>
 
-                  <div style={{ 
-                    height: '40px', 
-                    borderBottom: `1px solid ${theme.border}`, 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    padding: '0 24px', 
-                    background: isMapDarkMode ? theme.bg : '#ffffff', 
-                    position: 'relative' 
+                  <div style={{
+                    height: '40px',
+                    borderBottom: `1px solid ${theme.border}`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    padding: isMobile ? '0 12px' : '0 24px',
+                    background: isMapDarkMode ? theme.bg : '#ffffff',
+                    position: 'relative'
                   }}>
-                    <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: '0px' }}>
+                    {/* Centered title hidden on mobile: it collided with the right-side
+                        zoom slider, whose track line struck through the text. */}
+                    <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', display: isMobile ? 'none' : 'flex', alignItems: 'center', gap: '0px' }}>
                       <img src="/icons/icon-timeline.svg" style={{ width: '30px', height: '30px', filter: theme.invert }} alt="timeline" />
                       <span style={{ fontWeight: '700', fontSize: '20px', letterSpacing: '1px', textTransform: 'uppercase' }}>TIMELINE</span>
                     </div>
+                    {/* Mobile: small left-aligned label instead of the centered one */}
+                    {isMobile && (
+                      <span style={{ fontWeight: 700, fontSize: '11px', letterSpacing: '0.14em', textTransform: 'uppercase' }}>TIMELINE</span>
+                    )}
                     
                     <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
                       {/* ZOOM SLIDER AREA */}
@@ -8008,58 +8270,34 @@ function App() {
                     </div>
                   </div>
 
-                  {/* TIMELINE MAIN BODY */}
-                  <div 
-                    style={{ flex: 1, display: 'flex', alignItems: 'center', padding: '0 30px', background: theme.bg, position: 'relative', overflow: 'hidden' }}
-              onMouseDown={(e) => {
+                  {/* TIMELINE MAIN BODY — pointer events cover mouse AND touch drags */}
+                  <div
+                    style={{ flex: 1, display: 'flex', alignItems: 'center', padding: isMobile ? '0 4px' : '0 30px', background: theme.bg, position: 'relative', overflow: 'hidden', touchAction: 'none' }}
+              onPointerDown={(e) => {
                 if (e.target instanceof HTMLInputElement) return; // Don't drag if clicking sliders
+                e.currentTarget.setPointerCapture(e.pointerId);
+                isTimelineDraggingRef.current = true;
+                dragStartXRef.current = e.clientX;
+                dragStartTimelineStartRef.current = timelineWindowStart;
                 setIsTimelineDragging(true);
-                setDragStartX(e.clientX);
-                setDragStartTimelineStart(timelineWindowStart);
               }}
-              onMouseMove={(e) => {
-                if (!isTimelineDragging || !timelineRef.current) return;
-                const deltaX = e.clientX - dragStartX;
+              onPointerMove={(e) => {
+                if (!isTimelineDraggingRef.current || !timelineRef.current) return;
+                const deltaX = e.clientX - dragStartXRef.current;
                 const pixelWidth = timelineRef.current.clientWidth;
                 const yearsPerPixel = timelineWindowSpan / pixelWidth;
                 const yearDelta = deltaX * yearsPerPixel;
-                
-                let newStart = dragStartTimelineStart - yearDelta;
+
+                let newStart = dragStartTimelineStartRef.current - yearDelta;
                 // Constrain
                 newStart = Math.max(timeBounds.min, Math.min(timeBounds.max - timelineWindowSpan, newStart));
                 setTimelineWindowStart(newStart);
               }}
-              onMouseUp={() => setIsTimelineDragging(false)}
-              onMouseLeave={() => setIsTimelineDragging(false)}
+              onPointerUp={() => { isTimelineDraggingRef.current = false; setIsTimelineDragging(false); }}
+              onPointerCancel={() => { isTimelineDraggingRef.current = false; setIsTimelineDragging(false); }}
             >
               
-              {/* PAN LEFT BUTTON */}
-              <motion.button 
-                initial={false}
-                animate={{ 
-                  opacity: timelineWindowStart <= timeBounds.min ? 0 : 1,
-                  pointerEvents: timelineWindowStart <= timeBounds.min ? 'none' : 'auto'
-                }}
-                whileHover={{ opacity: 0.7 }}
-                onClick={() => setTimelineWindowStart(prev => Math.max(timeBounds.min, prev - (timelineWindowSpan * 0.1)))}
-                style={{
-                  width: '48px',
-                  height: '48px',
-                  borderRadius: '50%',
-                  background: isMapDarkMode ? 'transparent' : theme.bg,
-                  border: `1px solid ${isMapDarkMode ? '#ffffff' : theme.border}`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  zIndex: 2,
-                  marginRight: '12px',
-                  flexShrink: 0,
-                  transition: 'background-color 0.2s ease'
-                }}
-              >
-                <img src="/icons/icon-arrow-left.svg" style={{ width: '10px', height: '18px', filter: isMapDarkMode ? 'brightness(0)' : 'brightness(0)' }} alt="pan left" />
-              </motion.button>
+              {/* Pan is drag-only now (circle arrow buttons removed). */}
 
               {/* TIMELINE VISUAL AREA */}
               <div ref={timelineRef} style={{ 
@@ -8071,7 +8309,7 @@ function App() {
                 overflow: 'hidden',
                 background: isMapDarkMode ? '#000000' : '#ffffff' 
               }}>
-                <div style={{ flex: 1, position: 'relative', margin: '0 20px' }}>
+                <div style={{ flex: 1, position: 'relative', margin: isMobile ? '0 10px' : '0 20px' }}>
                   {/* GENERATE DIVIDERS AND DOTS */}
                   {(() => {
                     const years = [];
@@ -8103,6 +8341,28 @@ function App() {
                       return ((year - timelineWindowStart) / timelineWindowSpan) * 100;
                     };
 
+                    // Vertical offsets. On mobile the whole ruler drops to the
+                    // bottom of the section with minimal padding under the labels.
+                    const rulerBottom = isMobile ? 22 : 38;  // baseline + tick origin
+                    const labelBottom = isMobile ? 4 : 18;   // year labels
+                    const dotsBottom = isMobile ? 48 : 65;   // dot stack origin
+                    const rangeBottom = isMobile ? 18 : 32;  // range end-cap band
+
+                    // Only label major ticks that are far enough apart, so year
+                    // labels never smear together (min gap wider on mobile).
+                    const minLabelGapPct = isMobile ? 22 : 8;
+                    const labelYears = new Set<number>();
+                    let lastLabelX = -Infinity;
+                    for (const y of years) {
+                      if (y % majorInterval !== 0) continue;
+                      const x = getX(y);
+                      if (x < 0 || x > 100) continue;
+                      if (x - lastLabelX >= minLabelGapPct) {
+                        labelYears.add(y);
+                        lastLabelX = x;
+                      }
+                    }
+
                     return (
                       <>
                         {/* YEAR LABELS AND DIVIDERS */}
@@ -8116,22 +8376,23 @@ function App() {
                               <div style={{
                                 position: 'absolute',
                                 left: `${getX(y)}%`,
-                                bottom: '38px',
+                                bottom: `${rulerBottom}px`,
                                 height: isMajor ? '20px' : (isMedium ? '12px' : '8px'),
                                 width: '1px',
                                 background: isMajor ? theme.text : (isMapDarkMode ? '#444' : '#ccc'),
                                 zIndex: 0 // Behind baseline
                               }} />
-                              {isMajor && (
+                              {isMajor && labelYears.has(y) && (
                                 <div style={{
                                   position: 'absolute',
                                   left: `${getX(y)}%`,
-                                  bottom: '18px',
+                                  bottom: `${labelBottom}px`,
                                   transform: 'translateX(-50%)',
                                   fontSize: '10px',
                                   fontWeight: 'bold',
                                   color: theme.text,
-                                  zIndex: 1
+                                  zIndex: 1,
+                                  whiteSpace: 'nowrap'
                                 }}>
                                   {y}
                                 </div>
@@ -8141,7 +8402,7 @@ function App() {
                         })}
 
                         {/* THE HORIZONTAL BASE LINE - MOVED UP BY 10px to 38px */}
-                        <div style={{ position: 'absolute', bottom: '38px', left: 0, right: 0, height: '1px', background: theme.text, zIndex: 1 }} />
+                        <div style={{ position: 'absolute', bottom: `${rulerBottom}px`, left: 0, right: 0, height: '1px', background: theme.text, zIndex: 1 }} />
 
                         {/* FEATURE DOTS INDICATORS - AGGREGATED BY DYNAMIC BUCKETS FOR PERFORMANCE AND CLUSTERING */}
                         {(() => {
@@ -8207,14 +8468,14 @@ function App() {
                                     cat, 
                                     year: Math.round(centerYear), 
                                     x: getX(centerYear),
-                                    bottom: 65 + verticalOffset + size + 15
+                                    bottom: dotsBottom + verticalOffset + size + 15
                                   })}
                                   onHoverEnd={() => setHoveredBucket(null)}
                                   transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
                                   style={{
                                     position: 'absolute',
                                     left: `${getX(centerYear)}%`,
-                                    bottom: `${65 + verticalOffset}px`,
+                                    bottom: `${dotsBottom + verticalOffset}px`,
                                     width: `${size}px`,
                                     height: `${size}px`,
                                     borderRadius: '50%',
@@ -8265,7 +8526,7 @@ function App() {
                         {/* INPUTS FOR RANGE SELECTION (ON THE TIMELINE) AND HIGHLIGHT BAR */}
                         <div style={{
                           position: 'absolute',
-                          bottom: '32px', // Moved up to prevent covering the date numbers on the bottom
+                          bottom: `${rangeBottom}px`, // range end-cap band, sits just above the labels
                           left: '0px',
                           right: '0px',
                           height: '24px',
@@ -8360,37 +8621,10 @@ function App() {
                 </div>
               </div>
 
-              {/* PAN RIGHT BUTTON */}
-              <motion.button 
-                initial={false}
-                animate={{ 
-                  opacity: (timelineWindowStart + timelineWindowSpan) >= timeBounds.max ? 0 : 1,
-                  pointerEvents: (timelineWindowStart + timelineWindowSpan) >= timeBounds.max ? 'none' : 'auto'
-                }}
-                whileHover={{ opacity: 0.7 }}
-                onClick={() => setTimelineWindowStart(prev => Math.min(timeBounds.max - timelineWindowSpan, prev + (timelineWindowSpan * 0.1)))}
-                style={{
-                  width: '48px',
-                  height: '48px',
-                  borderRadius: '50%',
-                  background: isMapDarkMode ? 'transparent' : theme.bg,
-                  border: `1px solid ${isMapDarkMode ? '#ffffff' : theme.border}`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  zIndex: 2,
-                  marginLeft: '12px',
-                  flexShrink: 0,
-                  transition: 'background-color 0.2s ease'
-                }}
-              >
-                <img src="/icons/icon-arrow-left.svg" style={{ width: '10px', height: '18px', transform: 'rotate(180deg)', filter: isMapDarkMode ? 'brightness(0)' : 'brightness(0)' }} alt="pan right" />
-              </motion.button>
             </div>
 
-            {/* CUSTOM TIMELINE TOOLTIP OVERLAY - ALIGNED TO DOTS FIELD */}
-            <div style={{ position: 'absolute', top: '40px', bottom: 0, left: '110px', right: '110px', pointerEvents: 'none', overflow: 'visible', zIndex: 1000 }}>
+            {/* CUSTOM TIMELINE TOOLTIP OVERLAY - ALIGNED TO DOTS FIELD (visual area has 20px side margins) */}
+            <div style={{ position: 'absolute', top: '40px', bottom: 0, left: '20px', right: '20px', pointerEvents: 'none', overflow: 'visible', zIndex: 1000 }}>
               <AnimatePresence>
                 {hoveredBucket && (
                   <motion.div
@@ -8437,19 +8671,20 @@ function App() {
         </div>
         </div>
 
-        {/* Timeline Panel */}
+        {/* Timeline Panel — on mobile, sits below the header and above the tab bar
+            so both the site header and the timeline stay visible. */}
         <div
           style={{
             position: 'absolute',
-            top: 0,
+            top: isMobile ? 48 : 0,
             left: 0,
             right: 0,
-            bottom: 0,
+            bottom: isMobile ? 40 : 0,
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
             width: '100%',
-            height: '100%',
+            height: isMobile ? 'auto' : '100%',
             pointerEvents: currentPage === 'timeline' ? 'auto' : 'none',
             visibility: currentPage === 'timeline' ? 'visible' : 'hidden',
             opacity: currentPage === 'timeline' ? 1 : 0,
@@ -8457,9 +8692,10 @@ function App() {
             zIndex: currentPage === 'timeline' ? 12 : 0
           }}
         >
-          <TimelinePage 
-            theme={theme} 
-            isMapDarkMode={isMapDarkMode} 
+          {mountedPages.timeline && <Suspense fallback={null}><TimelinePage
+            theme={theme}
+            isMapDarkMode={isMapDarkMode}
+            isMobile={isMobile}
             timelineItems={combinedTimelineItems}
             selectedItem={selectedTimelineItem}
             setSelectedItem={setSelectedTimelineItem}
@@ -8476,7 +8712,7 @@ function App() {
               setFocusedCodexTermId(termId);
               setCurrentPage('codex');
             }}
-          />
+          /></Suspense>}
         </div>
 
         {/* Codex Panel */}
@@ -8499,10 +8735,11 @@ function App() {
             zIndex: currentPage === 'codex' ? 12 : 0
           }}
         >
-          <CodexPage
+          {mountedPages.codex && <Suspense fallback={null}><CodexPage
             theme={theme}
-            codexNodes={combinedCodexNodes}
+            codexNodes={termTreeData.length ? combinedCodexNodes : undefined}
             isMapDarkMode={isMapDarkMode}
+            isMobile={isMobile}
             focusedTermId={focusedCodexTermId}
             onFocusedTermConsumed={() => setFocusedCodexTermId(null)}
             onViewOnMap={(layerName, featureSearchTerm) => {
@@ -8554,7 +8791,7 @@ function App() {
             onSelectedTermChange={(node) => {
               setSelectedCodexNode(node);
             }}
-          />
+          /></Suspense>}
         </div>
       </div>
 
@@ -8566,7 +8803,36 @@ function App() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-            onClick={() => setIsLightboxOpen(false)}
+            onClick={() => {
+              // A swipe should page images, not close the lightbox.
+              if (lightboxTouchRef.current.swiped) {
+                lightboxTouchRef.current.swiped = false;
+                return;
+              }
+              // Don't close while zoomed in — tap should stay on the image.
+              if (lbZoomedRef.current) return;
+              setIsLightboxOpen(false);
+            }}
+            onTouchStart={(e) => {
+              const t = e.touches[0];
+              lightboxTouchRef.current = { x: t.clientX, y: t.clientY, swiped: false };
+            }}
+            onTouchEnd={(e) => {
+              if (!activeAssets || activeAssets.length < 2) return;
+              // While zoomed, one-finger movement pans the image, never pages.
+              if (lbZoomedRef.current) return;
+              const t = e.changedTouches[0];
+              const dx = t.clientX - lightboxTouchRef.current.x;
+              const dy = t.clientY - lightboxTouchRef.current.y;
+              if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) {
+                lightboxTouchRef.current.swiped = true;
+                if (dx < 0) {
+                  setActiveImageIndex(prev => (prev + 1) % activeAssets.length);
+                } else {
+                  setActiveImageIndex(prev => (prev - 1 + activeAssets.length) % activeAssets.length);
+                }
+              }
+            }}
             style={{ position: 'fixed', top: 0, left: 0, width: scrollbarWidth ? `calc(100vw - ${scrollbarWidth}px)` : '100vw', height: '100vh', background: 'rgba(0, 0, 0, 0.95)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, cursor: 'zoom-out', fontFamily: '"Space Mono", monospace' }}
           >
             <motion.button 
@@ -8717,14 +8983,48 @@ function App() {
                           </div>
                         </motion.div>
                       ) : (
-                        <motion.img 
+                        <motion.img
                           key={`${selectedFeature.id}-${activeImageIndex}`}
                           initial={{ opacity: 0, scale: 0.95 }}
-                          animate={{ opacity: isLightboxImageLoading ? 0 : 1, scale: 1 }}
+                          animate={{ opacity: isLightboxImageLoading ? 0 : 1, scale: lbZoom.scale, x: lbZoom.tx, y: lbZoom.ty }}
                           exit={{ opacity: 0, scale: 1.05 }}
-                          transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-                          src={imgSrc} 
-                          alt="High resolution dossier archive asset" 
+                          transition={lbPinchRef.current || lbZoom.scale > 1.01 ? { duration: 0 } : { duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+                          onDoubleClick={() => { if (isMobile) setLbZoom(z => z.scale > 1.01 ? { scale: 1, tx: 0, ty: 0 } : { scale: 2, tx: 0, ty: 0 }); }}
+                          onPointerDown={isMobile ? (e) => {
+                            lbPointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+                            if (lbPointersRef.current.size === 2) {
+                              const pts: { x: number; y: number }[] = Array.from(lbPointersRef.current.values());
+                              lbPinchRef.current = { dist: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1, startScale: lbZoom.scale };
+                            }
+                            if (lbPointersRef.current.size === 2 || lbZoomedRef.current) e.stopPropagation();
+                          } : undefined}
+                          onPointerMove={isMobile ? (e) => {
+                            if (!lbPointersRef.current.has(e.pointerId)) return;
+                            const prev = lbPointersRef.current.get(e.pointerId)!;
+                            lbPointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+                            if (lbPointersRef.current.size >= 2 && lbPinchRef.current) {
+                              const pts: { x: number; y: number }[] = Array.from(lbPointersRef.current.values());
+                              const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
+                              const scale = Math.max(1, Math.min(5, lbPinchRef.current.startScale * (dist / lbPinchRef.current.dist)));
+                              setLbZoom(z => ({ ...z, scale }));
+                              e.stopPropagation();
+                            } else if (lbZoomedRef.current) {
+                              // One-finger pan while zoomed.
+                              setLbZoom(z => ({ ...z, tx: z.tx + (e.clientX - prev.x), ty: z.ty + (e.clientY - prev.y) }));
+                              e.stopPropagation();
+                            }
+                          } : undefined}
+                          onPointerUp={isMobile ? (e) => {
+                            lbPointersRef.current.delete(e.pointerId);
+                            if (lbPointersRef.current.size < 2) lbPinchRef.current = null;
+                            if (lbZoom.scale <= 1.01) setLbZoom({ scale: 1, tx: 0, ty: 0 });
+                          } : undefined}
+                          onPointerCancel={isMobile ? (e) => {
+                            lbPointersRef.current.delete(e.pointerId);
+                            if (lbPointersRef.current.size < 2) lbPinchRef.current = null;
+                          } : undefined}
+                          src={imgSrc}
+                          alt="High resolution dossier archive asset"
                           referrerPolicy="no-referrer"
                           onLoad={() => setIsLightboxImageLoading(false)}
                           onError={(e) => {
@@ -8733,15 +9033,17 @@ function App() {
                               setBrokenImages(prev => ({ ...prev, [curAsset.url]: true }));
                             }
                           }}
-                          style={{ 
-                            maxWidth: '100%', 
-                            maxHeight: '100%', 
-                            objectFit: 'contain', 
+                          style={{
+                            maxWidth: '100%',
+                            maxHeight: '100%',
+                            objectFit: 'contain',
                             margin: 'auto',
                             backgroundColor: 'transparent',
                             width: isBroken ? '96px' : 'auto',
                             height: isBroken ? '96px' : 'auto',
-                            filter: isBroken ? 'invert(1)' : 'none'
+                            filter: isBroken ? 'invert(1)' : 'none',
+                            touchAction: isMobile ? 'none' : undefined,
+                            cursor: lbZoom.scale > 1.01 ? 'grab' : undefined
                           }}
                         />
                       )}
@@ -9145,8 +9447,8 @@ function App() {
               transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
               style={{
                 backgroundColor: '#ffffff',
-                width: '671px',
-                height: '530px',
+                width: 'min(671px, calc(100vw - 24px))',
+                height: 'min(530px, 90vh)',
                 position: 'relative',
                 textAlign: 'center',
                 boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
@@ -9160,8 +9462,8 @@ function App() {
               backgroundImage: 'url("https://raw.githubusercontent.com/northbeastclothing-design/MTRH/main/public/overlay-map-bg-%402x.png")',
               backgroundSize: '100% 100%',
               backgroundPosition: 'center',
-              height: '208px',
-              minHeight: '208px',
+              height: isMobile ? '140px' : '208px',
+              minHeight: isMobile ? '140px' : '208px',
               width: '100%',
               display: 'flex',
               alignItems: 'center',
@@ -9194,27 +9496,29 @@ function App() {
               <img 
                 src="https://raw.githubusercontent.com/northbeastclothing-design/MTRH/main/public/overlay-icons-%402x.png" 
                 alt="Icons Grid" 
-                style={{ 
+                style={{
                   position: 'absolute',
                   right: '0',
                   top: '0',
-                  width: '312px',
-                  height: '208px',
+                  width: isMobile ? '210px' : '312px',
+                  height: isMobile ? '140px' : '208px',
                   zIndex: 2,
                   objectFit: 'contain'
-                }} 
+                }}
                 referrerPolicy="no-referrer"
               />
             </div>
             
-            {/* BOTTOM SECTION CONTENT: remaining height is 268px */}
+            {/* BOTTOM SECTION CONTENT: scrolls so the ENTER button is always reachable */}
             <div style={{
-              padding: '40px 0',
+              padding: isMobile ? '24px 0' : '40px 0',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
               flex: 1,
-              justifyContent: 'center'
+              minHeight: 0,
+              overflowY: 'auto',
+              justifyContent: isMobile ? 'flex-start' : 'center'
             }}>
               <h2 style={{
                 fontFamily: '"Space Mono", monospace',
@@ -9223,7 +9527,7 @@ function App() {
                 marginBottom: '20px',
                 color: '#000000',
                 lineHeight: '1.2',
-                width: '570px',
+                width: 'min(570px, calc(100vw - 72px))',
                 textAlign: 'center'
               }}>
                 We are Mapping the Rabbit Hole
@@ -9234,7 +9538,7 @@ function App() {
                 fontSize: '12px',
                 lineHeight: '20px',
                 color: '#000000',
-                width: '570px',
+                width: 'min(570px, calc(100vw - 72px))',
                 marginBottom: '16px',
                 textAlign: 'center'
               }}>
@@ -9246,7 +9550,7 @@ function App() {
                 fontSize: '11px',
                 lineHeight: '18px',
                 color: '#666666',
-                width: '570px',
+                width: 'min(570px, calc(100vw - 72px))',
                 marginBottom: '30px',
                 textAlign: 'center',
                 fontStyle: 'italic'

@@ -15,6 +15,7 @@ interface TimelinePageProps {
     invert: string;
   };
   isMapDarkMode: boolean;
+  isMobile?: boolean;
   selectedItem: TimelineItem | null;
   setSelectedItem: (item: TimelineItem | null) => void;
   onViewOnMap: (item: TimelineItem) => void;
@@ -170,6 +171,7 @@ const ERAS_CONFIG = [
 export default function TimelinePage({
   theme,
   isMapDarkMode,
+  isMobile = false,
   selectedItem,
   setSelectedItem,
   onViewOnMap,
@@ -182,6 +184,17 @@ export default function TimelinePage({
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const hasDraggedRef = useRef(false);
+  // Two-finger pinch on touch: tracks active pointers and the gesture baseline
+  // so the year window zooms around the pinch midpoint.
+  const activePointersRef = useRef<Map<number, number>>(new Map());
+  const pinchRef = useRef<{ dist: number; anchorYear: number; anchorFrac: number; span: number } | null>(null);
+  // Baselines for a one-finger drag: horizontal pans the year window, vertical
+  // scrolls the era tracks (handled in JS so the drag is reliable on touch).
+  const dragStartYRef = useRef(0);
+  const dragStartScrollTopRef = useRef(0);
+  // Mobile: collapse the search/zoom/reset controls behind a caret so the
+  // timeline itself always has room.
+  const [controlsOpen, setControlsOpen] = useState(true);
 
   // Match the active timeline item to a Codex term
   const codexTerm = useMemo(() => {
@@ -267,6 +280,11 @@ export default function TimelinePage({
   const [isDragging, setIsDragging] = useState(false);
   const [startX, setStartX] = useState(0);
   const [startViewStart, setStartViewStart] = useState(0);
+  // Refs mirror the drag state so pointer-move reads current values immediately
+  // (state lags a render, which dropped the drag entirely on touch).
+  const isDraggingRef = useRef(false);
+  const startXRef = useRef(0);
+  const startViewStartRef = useRef(0);
 
   const span = viewEnd - viewStart;
 
@@ -413,38 +431,89 @@ export default function TimelinePage({
   }, [initialMaximizedEraId]);
 
   // Drag Handlers
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button !== 0) return; // Left click only
+  // Pointer events cover mouse AND touch, so the year window pans by finger drag.
+  const handleMouseDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return; // Primary pointer only
+    activePointersRef.current.set(e.pointerId, e.clientX);
+    if (activePointersRef.current.size === 2 && scrollContainerRef.current) {
+      // Begin pinch: anchor the year under the pinch midpoint.
+      const xs: number[] = Array.from(activePointersRef.current.values());
+      const rect = scrollContainerRef.current.getBoundingClientRect();
+      const midX = (xs[0] + xs[1]) / 2;
+      const frac = Math.min(1, Math.max(0, (midX - rect.left) / rect.width));
+      pinchRef.current = {
+        dist: Math.abs(xs[0] - xs[1]),
+        anchorFrac: frac,
+        anchorYear: viewStart + frac * span,
+        span,
+      };
+      isDraggingRef.current = false;
+      setIsDragging(false);
+      return;
+    }
+    isDraggingRef.current = true;
+    startXRef.current = e.clientX;
+    startViewStartRef.current = viewStart;
     setIsDragging(true);
     setStartX(e.clientX);
     setStartViewStart(viewStart);
+    dragStartYRef.current = e.clientY;
+    dragStartScrollTopRef.current = scrollContainerRef.current?.scrollTop ?? 0;
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch {}
     hasDraggedRef.current = false;
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging || !scrollContainerRef.current) return;
-    const deltaX = e.clientX - startX;
-    if (Math.abs(deltaX) > 5) {
+  const handleMouseMove = (e: React.PointerEvent) => {
+    if (activePointersRef.current.has(e.pointerId)) {
+      activePointersRef.current.set(e.pointerId, e.clientX);
+    }
+    // Pinch zoom takes precedence over pan while two fingers are down.
+    if (activePointersRef.current.size >= 2 && pinchRef.current) {
+      const xs: number[] = Array.from(activePointersRef.current.values());
+      const newDist = Math.abs(xs[0] - xs[1]) || 1;
+      const ratio = pinchRef.current.dist / newDist; // fingers apart => ratio<1 => zoom in
+      let newSpan = pinchRef.current.span * ratio;
+      newSpan = Math.max(50, Math.min(253500, newSpan));
+      const newStart = pinchRef.current.anchorYear - pinchRef.current.anchorFrac * newSpan;
+      const clampedStart = Math.max(-250000, Math.min(3500 - newSpan, newStart));
+      setViewStart(clampedStart);
+      setViewEnd(clampedStart + newSpan);
+      hasDraggedRef.current = true;
+      return;
+    }
+    if (!isDraggingRef.current || !scrollContainerRef.current) return;
+    const deltaX = e.clientX - startXRef.current;
+    const deltaY = e.clientY - dragStartYRef.current;
+    if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
       hasDraggedRef.current = true;
     }
     const viewportWidth = scrollContainerRef.current.clientWidth;
     const yearsPerPixel = span / viewportWidth;
     const deltaYears = deltaX * yearsPerPixel;
-    
-    const newStart = startViewStart - deltaYears;
+
+    const newStart = startViewStartRef.current - deltaYears;
     const currentSpan = viewEnd - viewStart;
-    
-    // Bounds clamping
+
+    // Horizontal: pan the year window.
     const clampedStart = Math.max(-250000, Math.min(3500 - currentSpan, newStart));
-    
     setViewStart(clampedStart);
     setViewEnd(clampedStart + currentSpan);
+
+    // Vertical: scroll the era tracks (we own the gesture, so do it manually).
+    scrollContainerRef.current.scrollTop = dragStartScrollTopRef.current - deltaY;
   };
 
-  const handleMouseUpOrLeave = (e: React.MouseEvent) => {
+  const handleMouseUpOrLeave = (e: React.PointerEvent) => {
+    activePointersRef.current.delete(e.pointerId);
+    if (activePointersRef.current.size < 2) {
+      pinchRef.current = null;
+    }
+    isDraggingRef.current = false;
     setIsDragging(false);
-    if (e.type === 'mouseup' && !hasDraggedRef.current && selectedItem) {
-      setSelectedItem(null);
+    if ((e.type === 'pointerup' || e.type === 'mouseup') && !hasDraggedRef.current) {
+      // Tap on empty track space clears selection and (mobile) the trace.
+      if (selectedItem) setSelectedItem(null);
+      if (isMobile) setHoveredItemId(null);
     }
   };
 
@@ -587,6 +656,25 @@ export default function TimelinePage({
 
     return { list, majorInterval, mediumInterval };
   }, [viewStart, viewEnd, span]);
+
+  // Which major ticks actually get a year label. Rendering every major tick
+  // smears the labels together on a narrow screen, so keep a minimum horizontal
+  // gap between labels (wider on mobile, where the viewport is small).
+  const labeledYears = useMemo(() => {
+    const minGapPct = isMobile ? 20 : 7;
+    const set = new Set<number>();
+    let lastX = -Infinity;
+    for (const y of ticks.list) {
+      if (y % ticks.majorInterval !== 0) continue;
+      const x = ((y - viewStart) / span) * 100;
+      if (x < 0 || x > 100) continue;
+      if (x - lastX >= minGapPct) {
+        set.add(y);
+        lastX = x;
+      }
+    }
+    return set;
+  }, [ticks, viewStart, span, isMobile]);
 
   // Helper to find the closest event offscreen for a specific era
   const getEraOffscreenNav = (eraId: string) => {
@@ -850,19 +938,22 @@ export default function TimelinePage({
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: isMapDarkMode ? 'rgba(0, 0, 0, 0.85)' : 'rgba(255, 255, 255, 0.85)', color: theme.text, overflow: 'hidden', borderTop: `1px solid ${theme.border}`, position: 'relative' }}>
       
       {/* TIMELINE VIEWPORT SCROLLER (TOP/CENTER) */}
-      <div 
+      <div
         ref={scrollContainerRef}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUpOrLeave}
-        onMouseLeave={handleMouseUpOrLeave}
+        onPointerDown={handleMouseDown}
+        onPointerMove={handleMouseMove}
+        onPointerUp={handleMouseUpOrLeave}
+        onPointerLeave={handleMouseUpOrLeave}
         className="custom-sidebar-scrollbar"
         style={{
           flex: 1,
           overflowX: 'hidden',
           overflowY: 'auto',
           cursor: isDragging ? 'grabbing' : 'grab',
-          userSelect: 'none'
+          userSelect: 'none',
+          // We own the gesture in JS (horizontal = pan years, vertical = scroll
+          // tracks), so disable the browser's touch panning entirely.
+          touchAction: 'none'
         }}
       >
         <div style={{ minWidth: '100%', height: `${Math.max(400, trackOffsets.totalHeight)}px`, position: 'relative' }}>
@@ -1154,20 +1245,27 @@ export default function TimelinePage({
                         const distToNext = nextStart - xStart;
                         const pctOfParent = (distToNext / width) * 100;
                         
-                        const mask = isHovered || isSelected 
-                          ? 'none' 
+                        // On mobile, don't fade/clip the label — let it overflow to
+                        // the right of a short bar so it stays readable while exploring.
+                        const mask = isHovered || isSelected || isMobile
+                          ? 'none'
                           : 'linear-gradient(to right, #000 calc(100% - 16px), transparent 100%)';
 
                         if (item.type === 'lifespan') {
                           return (
                             <React.Fragment key={item.id}>
                               <div
-                                onMouseEnter={() => setHoveredItemId(item.id)}
-                                onMouseLeave={() => setHoveredItemId(null)}
-                                onMouseDown={(e) => e.stopPropagation()}
+                                onMouseEnter={() => { if (!isMobile) setHoveredItemId(item.id); }}
+                                onMouseLeave={() => { if (!isMobile) setHoveredItemId(null); }}
+                                // On mobile let pointer-down reach the scroller so a
+                                // drag starting on a bar still pans; desktop keeps stopPropagation.
+                                onPointerDown={(e) => { if (!isMobile) e.stopPropagation(); }}
                                 onMouseUp={(e) => e.stopPropagation()}
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  if (hasDraggedRef.current) return; // a drag shouldn't select
+                                  // On touch there's no hover, so tap drives the trace/relationship lines.
+                                  if (isMobile) setHoveredItemId(item.id);
                                   handleItemClick(item);
                                 }}
                                 style={{
@@ -1196,17 +1294,18 @@ export default function TimelinePage({
                                   boxShadow: isSelected ? `0 0 15px ${era.color}` : 'none',
                                   transition: 'background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease',
                                   pointerEvents: 'auto',
-                                  overflow: 'hidden',
+                                  // Let the label spill past a short bar on mobile.
+                                  overflow: isMobile && !(isHovered || isSelected) ? 'visible' : 'hidden',
                                   zIndex: isSelected ? 300 : (isHovered ? 200 : (isHighlight ? 100 : 5))
                                 }}
                               >
-                                <span style={{ 
+                                <span style={{
                                   display: 'flex',
                                   alignItems: 'center',
-                                  whiteSpace: 'nowrap', 
-                                  overflow: 'hidden', 
-                                  width: '100%',
-                                  maxWidth: isHovered || isSelected ? 'none' : `calc(${pctOfParent}% - 16px)`,
+                                  whiteSpace: 'nowrap',
+                                  overflow: isMobile && !(isHovered || isSelected) ? 'visible' : 'hidden',
+                                  width: isMobile && !(isHovered || isSelected) ? 'auto' : '100%',
+                                  maxWidth: (isHovered || isSelected || isMobile) ? 'none' : `calc(${pctOfParent}% - 16px)`,
                                   WebkitMaskImage: mask,
                                   maskImage: mask
                                 }}>
@@ -1255,12 +1354,14 @@ export default function TimelinePage({
                           return (
                             <div
                               key={item.id}
-                              onMouseEnter={() => setHoveredItemId(item.id)}
-                              onMouseLeave={() => setHoveredItemId(null)}
-                              onMouseDown={(e) => e.stopPropagation()}
+                              onMouseEnter={() => { if (!isMobile) setHoveredItemId(item.id); }}
+                              onMouseLeave={() => { if (!isMobile) setHoveredItemId(null); }}
+                              onPointerDown={(e) => { if (!isMobile) e.stopPropagation(); }}
                               onMouseUp={(e) => e.stopPropagation()}
                               onClick={(e) => {
                                 e.stopPropagation();
+                                if (hasDraggedRef.current) return; // a drag shouldn't select
+                                if (isMobile) setHoveredItemId(item.id);
                                 handleItemClick(item);
                               }}
                               style={{
@@ -1799,6 +1900,46 @@ export default function TimelinePage({
 
       </div>
 
+      {/* MOBILE: black square tab (same as the map timeline). Zero-height anchor
+          so the box hangs over the content above with no full-width background. */}
+      {isMobile && (
+        <div style={{ position: 'relative', height: 0, zIndex: 30, pointerEvents: 'none' }}>
+          <button
+            onClick={() => setControlsOpen(o => !o)}
+            aria-label={controlsOpen ? 'Hide controls' : 'Show controls'}
+            style={{
+              position: 'absolute',
+              bottom: '0px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              width: '44px',
+              height: '22px',
+              background: theme.text,
+              color: theme.bg,
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 0,
+              pointerEvents: 'auto'
+            }}
+          >
+            <img
+              src="/icons/icon-arrow-left.svg"
+              alt="toggle"
+              style={{
+                width: '7px',
+                height: '13px',
+                // up arrow when controls hidden (pull up), down when shown
+                transform: controlsOpen ? 'rotate(270deg)' : 'rotate(90deg)',
+                filter: isMapDarkMode ? 'brightness(0)' : 'none'
+              }}
+            />
+          </button>
+        </div>
+      )}
+
       {/* LOCKED YEAR RULER (BOTTOM) */}
       <div style={{ 
         height: '42px', 
@@ -1827,7 +1968,7 @@ export default function TimelinePage({
                 background: isMajor ? theme.text : (isMapDarkMode ? '#444' : '#ccc')
               }} />
               
-              {isMajor && (
+              {isMajor && labeledYears.has(y) && (
                 <div style={{
                   position: 'absolute',
                   left: `${xPos}%`,
@@ -1836,7 +1977,8 @@ export default function TimelinePage({
                   fontSize: '9px',
                   fontWeight: 'bold',
                   fontFamily: '"Space Mono", monospace',
-                  color: theme.text
+                  color: theme.text,
+                  whiteSpace: 'nowrap'
                 }}>
                   {formatYear(y)}
                 </div>
@@ -1847,24 +1989,28 @@ export default function TimelinePage({
       </div>
 
       {/* BOTTOM CONTROLS PANEL (BOTTOM BAR) */}
-      <div 
+      <div
         style={{
-          height: '64px',
+          height: isMobile && !controlsOpen ? '0px' : '64px',
           background: theme.bg,
-          borderTop: `1px solid ${theme.border}`,
-          padding: '0 24px',
+          borderTop: isMobile ? 'none' : `1px solid ${theme.border}`,
+          padding: isMobile ? (controlsOpen ? '0 12px' : '0 12px') : '0 24px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
+          gap: isMobile ? '10px' : '0',
           zIndex: 200,
           boxSizing: 'border-box',
           position: 'relative',
           pointerEvents: 'auto',
-          flexShrink: 0
+          flexShrink: 0,
+          overflow: 'hidden',
+          opacity: isMobile && !controlsOpen ? 0 : 1,
+          transition: 'height 0.25s ease, opacity 0.2s ease'
         }}
       >
-        {/* Left: Search input */}
-        <div style={{ position: 'relative', width: '220px', flexShrink: 0 }}>
+        {/* Left: Search input — flexes to share the row on mobile */}
+        <div style={{ position: 'relative', width: isMobile ? 'auto' : '220px', flex: isMobile ? 1 : 'none', minWidth: 0, flexShrink: isMobile ? 1 : 0 }}>
           <input 
             type="text" 
             placeholder="SEARCH TIMELINE EVENTS..." 
