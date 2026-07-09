@@ -1857,15 +1857,16 @@ export default function TimelinePage({
       </div>
 
       {/* BOTTOM CONTROLS PANEL (BOTTOM BAR) */}
-      <div 
+      <div
         style={{
           height: '64px',
           background: theme.bg,
           borderTop: `1px solid ${theme.border}`,
-          padding: '0 24px',
+          padding: isMobile ? '0 12px' : '0 24px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
+          gap: isMobile ? '10px' : '0',
           zIndex: 200,
           boxSizing: 'border-box',
           position: 'relative',
@@ -1873,8 +1874,8 @@ export default function TimelinePage({
           flexShrink: 0
         }}
       >
-        {/* Left: Search input */}
-        <div style={{ position: 'relative', width: '220px', flexShrink: 0 }}>
+        {/* Left: Search input — flexes to share the row on mobile */}
+        <div style={{ position: 'relative', width: isMobile ? 'auto' : '220px', flex: isMobile ? 1 : 'none', minWidth: 0, flexShrink: isMobile ? 1 : 0 }}>
           <input 
             type="text" 
             placeholder="SEARCH TIMELINE EVENTS..." 
