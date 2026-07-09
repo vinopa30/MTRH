@@ -8262,7 +8262,7 @@ function App() {
 
                   {/* TIMELINE MAIN BODY — pointer events cover mouse AND touch drags */}
                   <div
-                    style={{ flex: 1, display: 'flex', alignItems: 'center', padding: '0 30px', background: theme.bg, position: 'relative', overflow: 'hidden', touchAction: 'none' }}
+                    style={{ flex: 1, display: 'flex', alignItems: 'center', padding: isMobile ? '0 4px' : '0 30px', background: theme.bg, position: 'relative', overflow: 'hidden', touchAction: 'none' }}
               onPointerDown={(e) => {
                 if (e.target instanceof HTMLInputElement) return; // Don't drag if clicking sliders
                 e.currentTarget.setPointerCapture(e.pointerId);
@@ -8298,7 +8298,7 @@ function App() {
                 overflow: 'hidden',
                 background: isMapDarkMode ? '#000000' : '#ffffff' 
               }}>
-                <div style={{ flex: 1, position: 'relative', margin: '0 20px' }}>
+                <div style={{ flex: 1, position: 'relative', margin: isMobile ? '0 10px' : '0 20px' }}>
                   {/* GENERATE DIVIDERS AND DOTS */}
                   {(() => {
                     const years = [];
@@ -8330,6 +8330,13 @@ function App() {
                       return ((year - timelineWindowStart) / timelineWindowSpan) * 100;
                     };
 
+                    // Vertical offsets. On mobile the whole ruler drops to the
+                    // bottom of the section with minimal padding under the labels.
+                    const rulerBottom = isMobile ? 22 : 38;  // baseline + tick origin
+                    const labelBottom = isMobile ? 4 : 18;   // year labels
+                    const dotsBottom = isMobile ? 48 : 65;   // dot stack origin
+                    const rangeBottom = isMobile ? 18 : 32;  // range end-cap band
+
                     // Only label major ticks that are far enough apart, so year
                     // labels never smear together (min gap wider on mobile).
                     const minLabelGapPct = isMobile ? 22 : 8;
@@ -8358,7 +8365,7 @@ function App() {
                               <div style={{
                                 position: 'absolute',
                                 left: `${getX(y)}%`,
-                                bottom: '38px',
+                                bottom: `${rulerBottom}px`,
                                 height: isMajor ? '20px' : (isMedium ? '12px' : '8px'),
                                 width: '1px',
                                 background: isMajor ? theme.text : (isMapDarkMode ? '#444' : '#ccc'),
@@ -8368,7 +8375,7 @@ function App() {
                                 <div style={{
                                   position: 'absolute',
                                   left: `${getX(y)}%`,
-                                  bottom: '18px',
+                                  bottom: `${labelBottom}px`,
                                   transform: 'translateX(-50%)',
                                   fontSize: '10px',
                                   fontWeight: 'bold',
@@ -8384,7 +8391,7 @@ function App() {
                         })}
 
                         {/* THE HORIZONTAL BASE LINE - MOVED UP BY 10px to 38px */}
-                        <div style={{ position: 'absolute', bottom: '38px', left: 0, right: 0, height: '1px', background: theme.text, zIndex: 1 }} />
+                        <div style={{ position: 'absolute', bottom: `${rulerBottom}px`, left: 0, right: 0, height: '1px', background: theme.text, zIndex: 1 }} />
 
                         {/* FEATURE DOTS INDICATORS - AGGREGATED BY DYNAMIC BUCKETS FOR PERFORMANCE AND CLUSTERING */}
                         {(() => {
@@ -8450,14 +8457,14 @@ function App() {
                                     cat, 
                                     year: Math.round(centerYear), 
                                     x: getX(centerYear),
-                                    bottom: 65 + verticalOffset + size + 15
+                                    bottom: dotsBottom + verticalOffset + size + 15
                                   })}
                                   onHoverEnd={() => setHoveredBucket(null)}
                                   transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
                                   style={{
                                     position: 'absolute',
                                     left: `${getX(centerYear)}%`,
-                                    bottom: `${65 + verticalOffset}px`,
+                                    bottom: `${dotsBottom + verticalOffset}px`,
                                     width: `${size}px`,
                                     height: `${size}px`,
                                     borderRadius: '50%',
@@ -8508,7 +8515,7 @@ function App() {
                         {/* INPUTS FOR RANGE SELECTION (ON THE TIMELINE) AND HIGHLIGHT BAR */}
                         <div style={{
                           position: 'absolute',
-                          bottom: '32px', // Moved up to prevent covering the date numbers on the bottom
+                          bottom: `${rangeBottom}px`, // range end-cap band, sits just above the labels
                           left: '0px',
                           right: '0px',
                           height: '24px',
