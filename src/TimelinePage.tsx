@@ -280,6 +280,11 @@ export default function TimelinePage({
   const [isDragging, setIsDragging] = useState(false);
   const [startX, setStartX] = useState(0);
   const [startViewStart, setStartViewStart] = useState(0);
+  // Refs mirror the drag state so pointer-move reads current values immediately
+  // (state lags a render, which dropped the drag entirely on touch).
+  const isDraggingRef = useRef(false);
+  const startXRef = useRef(0);
+  const startViewStartRef = useRef(0);
 
   const span = viewEnd - viewStart;
 
@@ -442,9 +447,13 @@ export default function TimelinePage({
         anchorYear: viewStart + frac * span,
         span,
       };
+      isDraggingRef.current = false;
       setIsDragging(false);
       return;
     }
+    isDraggingRef.current = true;
+    startXRef.current = e.clientX;
+    startViewStartRef.current = viewStart;
     setIsDragging(true);
     setStartX(e.clientX);
     setStartViewStart(viewStart);
@@ -472,8 +481,8 @@ export default function TimelinePage({
       hasDraggedRef.current = true;
       return;
     }
-    if (!isDragging || !scrollContainerRef.current) return;
-    const deltaX = e.clientX - startX;
+    if (!isDraggingRef.current || !scrollContainerRef.current) return;
+    const deltaX = e.clientX - startXRef.current;
     const deltaY = e.clientY - dragStartYRef.current;
     if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
       hasDraggedRef.current = true;
@@ -482,7 +491,7 @@ export default function TimelinePage({
     const yearsPerPixel = span / viewportWidth;
     const deltaYears = deltaX * yearsPerPixel;
 
-    const newStart = startViewStart - deltaYears;
+    const newStart = startViewStartRef.current - deltaYears;
     const currentSpan = viewEnd - viewStart;
 
     // Horizontal: pan the year window.
@@ -499,6 +508,7 @@ export default function TimelinePage({
     if (activePointersRef.current.size < 2) {
       pinchRef.current = null;
     }
+    isDraggingRef.current = false;
     setIsDragging(false);
     if ((e.type === 'pointerup' || e.type === 'mouseup') && !hasDraggedRef.current) {
       // Tap on empty track space clears selection and (mobile) the trace.
@@ -1247,10 +1257,13 @@ export default function TimelinePage({
                               <div
                                 onMouseEnter={() => { if (!isMobile) setHoveredItemId(item.id); }}
                                 onMouseLeave={() => { if (!isMobile) setHoveredItemId(null); }}
-                                onPointerDown={(e) => e.stopPropagation()}
+                                // On mobile let pointer-down reach the scroller so a
+                                // drag starting on a bar still pans; desktop keeps stopPropagation.
+                                onPointerDown={(e) => { if (!isMobile) e.stopPropagation(); }}
                                 onMouseUp={(e) => e.stopPropagation()}
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  if (hasDraggedRef.current) return; // a drag shouldn't select
                                   // On touch there's no hover, so tap drives the trace/relationship lines.
                                   if (isMobile) setHoveredItemId(item.id);
                                   handleItemClick(item);
@@ -1343,10 +1356,11 @@ export default function TimelinePage({
                               key={item.id}
                               onMouseEnter={() => { if (!isMobile) setHoveredItemId(item.id); }}
                               onMouseLeave={() => { if (!isMobile) setHoveredItemId(null); }}
-                              onPointerDown={(e) => e.stopPropagation()}
+                              onPointerDown={(e) => { if (!isMobile) e.stopPropagation(); }}
                               onMouseUp={(e) => e.stopPropagation()}
                               onClick={(e) => {
                                 e.stopPropagation();
+                                if (hasDraggedRef.current) return; // a drag shouldn't select
                                 if (isMobile) setHoveredItemId(item.id);
                                 handleItemClick(item);
                               }}
@@ -1895,7 +1909,7 @@ export default function TimelinePage({
             aria-label={controlsOpen ? 'Hide controls' : 'Show controls'}
             style={{
               position: 'absolute',
-              bottom: '2px',
+              bottom: '0px',
               left: '50%',
               transform: 'translateX(-50%)',
               width: '44px',
