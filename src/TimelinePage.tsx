@@ -188,6 +188,9 @@ export default function TimelinePage({
   // so the year window zooms around the pinch midpoint.
   const activePointersRef = useRef<Map<number, number>>(new Map());
   const pinchRef = useRef<{ dist: number; anchorYear: number; anchorFrac: number; span: number } | null>(null);
+  // Mobile: collapse the search/zoom/reset controls behind a caret so the
+  // timeline itself always has room.
+  const [controlsOpen, setControlsOpen] = useState(true);
 
   // Match the active timeline item to a Codex term
   const codexTerm = useMemo(() => {
@@ -1897,13 +1900,39 @@ export default function TimelinePage({
         })}
       </div>
 
+      {/* MOBILE: caret handle to show/hide the controls, keeping the timeline visible */}
+      {isMobile && (
+        <button
+          onClick={() => setControlsOpen(o => !o)}
+          aria-label={controlsOpen ? 'Hide controls' : 'Show controls'}
+          style={{
+            flexShrink: 0,
+            height: '22px',
+            width: '100%',
+            background: theme.bg,
+            borderTop: `1px solid ${theme.border}`,
+            borderBottom: controlsOpen ? 'none' : `1px solid ${theme.border}`,
+            borderLeft: 'none',
+            borderRight: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            color: theme.text,
+            padding: 0
+          }}
+        >
+          <span style={{ fontSize: '12px', lineHeight: 1 }}>{controlsOpen ? '⌄' : '⌃'}</span>
+        </button>
+      )}
+
       {/* BOTTOM CONTROLS PANEL (BOTTOM BAR) */}
       <div
         style={{
-          height: '64px',
+          height: isMobile && !controlsOpen ? '0px' : '64px',
           background: theme.bg,
-          borderTop: `1px solid ${theme.border}`,
-          padding: isMobile ? '0 12px' : '0 24px',
+          borderTop: isMobile ? 'none' : `1px solid ${theme.border}`,
+          padding: isMobile ? (controlsOpen ? '0 12px' : '0 12px') : '0 24px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -1912,7 +1941,10 @@ export default function TimelinePage({
           boxSizing: 'border-box',
           position: 'relative',
           pointerEvents: 'auto',
-          flexShrink: 0
+          flexShrink: 0,
+          overflow: 'hidden',
+          opacity: isMobile && !controlsOpen ? 0 : 1,
+          transition: 'height 0.25s ease, opacity 0.2s ease'
         }}
       >
         {/* Left: Search input — flexes to share the row on mobile */}

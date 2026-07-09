@@ -30,8 +30,11 @@ const MobileTabBar: React.FC<MobileTabBarProps> = ({ currentPage, setCurrentPage
         left: 0,
         right: 0,
         bottom: 0,
-        height: 'calc(40px + env(safe-area-inset-bottom, 0px))',
-        paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+        // Sit flush near the browser URL bar; add only a small safe-area cushion
+        // (capped) so the labels aren't jammed against the home indicator in
+        // standalone mode, without leaving a big empty strip in Safari.
+        height: 'calc(40px + min(env(safe-area-inset-bottom, 0px), 8px))',
+        paddingBottom: 'min(env(safe-area-inset-bottom, 0px), 8px)',
         display: 'flex',
         background: theme.bg,
         borderTop: `1px solid ${theme.border}`,

@@ -6195,7 +6195,7 @@ function App() {
             style={{
               position: 'fixed',
               left: '16px',
-              bottom: 'calc(40px + 16px + env(safe-area-inset-bottom, 0px))',
+              bottom: 'calc(40px + 16px + min(env(safe-area-inset-bottom, 0px), 8px))',
               zIndex: 400,
               display: 'flex',
               alignItems: 'center',
@@ -8667,19 +8667,20 @@ function App() {
         </div>
         </div>
 
-        {/* Timeline Panel */}
+        {/* Timeline Panel — on mobile, sits below the header and above the tab bar
+            so both the site header and the timeline stay visible. */}
         <div
           style={{
             position: 'absolute',
-            top: 0,
+            top: isMobile ? 48 : 0,
             left: 0,
             right: 0,
-            bottom: 0,
+            bottom: isMobile ? 40 : 0,
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
             width: '100%',
-            height: '100%',
+            height: isMobile ? 'auto' : '100%',
             pointerEvents: currentPage === 'timeline' ? 'auto' : 'none',
             visibility: currentPage === 'timeline' ? 'visible' : 'hidden',
             opacity: currentPage === 'timeline' ? 1 : 0,
