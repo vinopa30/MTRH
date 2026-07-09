@@ -1235,8 +1235,10 @@ export default function TimelinePage({
                         const distToNext = nextStart - xStart;
                         const pctOfParent = (distToNext / width) * 100;
                         
-                        const mask = isHovered || isSelected 
-                          ? 'none' 
+                        // On mobile, don't fade/clip the label — let it overflow to
+                        // the right of a short bar so it stays readable while exploring.
+                        const mask = isHovered || isSelected || isMobile
+                          ? 'none'
                           : 'linear-gradient(to right, #000 calc(100% - 16px), transparent 100%)';
 
                         if (item.type === 'lifespan') {
@@ -1279,17 +1281,18 @@ export default function TimelinePage({
                                   boxShadow: isSelected ? `0 0 15px ${era.color}` : 'none',
                                   transition: 'background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease',
                                   pointerEvents: 'auto',
-                                  overflow: 'hidden',
+                                  // Let the label spill past a short bar on mobile.
+                                  overflow: isMobile && !(isHovered || isSelected) ? 'visible' : 'hidden',
                                   zIndex: isSelected ? 300 : (isHovered ? 200 : (isHighlight ? 100 : 5))
                                 }}
                               >
-                                <span style={{ 
+                                <span style={{
                                   display: 'flex',
                                   alignItems: 'center',
-                                  whiteSpace: 'nowrap', 
-                                  overflow: 'hidden', 
-                                  width: '100%',
-                                  maxWidth: isHovered || isSelected ? 'none' : `calc(${pctOfParent}% - 16px)`,
+                                  whiteSpace: 'nowrap',
+                                  overflow: isMobile && !(isHovered || isSelected) ? 'visible' : 'hidden',
+                                  width: isMobile && !(isHovered || isSelected) ? 'auto' : '100%',
+                                  maxWidth: (isHovered || isSelected || isMobile) ? 'none' : `calc(${pctOfParent}% - 16px)`,
                                   WebkitMaskImage: mask,
                                   maskImage: mask
                                 }}>
@@ -1931,30 +1934,39 @@ export default function TimelinePage({
         })}
       </div>
 
-      {/* MOBILE: caret handle to show/hide the controls, keeping the timeline visible */}
+      {/* MOBILE: black square tab (same as the map timeline) to pull the search/
+          span/reset controls up and down. */}
       {isMobile && (
-        <button
-          onClick={() => setControlsOpen(o => !o)}
-          aria-label={controlsOpen ? 'Hide controls' : 'Show controls'}
-          style={{
-            flexShrink: 0,
-            height: '22px',
-            width: '100%',
-            background: theme.bg,
-            borderTop: `1px solid ${theme.border}`,
-            borderBottom: controlsOpen ? 'none' : `1px solid ${theme.border}`,
-            borderLeft: 'none',
-            borderRight: 'none',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-            color: theme.text,
-            padding: 0
-          }}
-        >
-          <span style={{ fontSize: '12px', lineHeight: 1 }}>{controlsOpen ? '⌄' : '⌃'}</span>
-        </button>
+        <div style={{ flexShrink: 0, height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderTop: controlsOpen ? 'none' : `1px solid ${theme.border}` }}>
+          <button
+            onClick={() => setControlsOpen(o => !o)}
+            aria-label={controlsOpen ? 'Hide controls' : 'Show controls'}
+            style={{
+              width: '44px',
+              height: '22px',
+              background: theme.text,
+              color: theme.bg,
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 0
+            }}
+          >
+            <img
+              src="/icons/icon-arrow-left.svg"
+              alt="toggle"
+              style={{
+                width: '7px',
+                height: '13px',
+                // up arrow when controls hidden (pull up), down when shown
+                transform: controlsOpen ? 'rotate(270deg)' : 'rotate(90deg)',
+                filter: isMapDarkMode ? 'brightness(0)' : 'none'
+              }}
+            />
+          </button>
+        </div>
       )}
 
       {/* BOTTOM CONTROLS PANEL (BOTTOM BAR) */}
