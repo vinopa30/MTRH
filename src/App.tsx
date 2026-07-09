@@ -5942,7 +5942,11 @@ function App() {
             zIndex: 20,
             pointerEvents: 'none',
             position: 'relative',
-            background: (currentPage === 'map' || currentPage === 'codex' || currentPage === 'timeline') ? 'transparent' : (isMapDarkMode ? '#000000' : '#ffffff'),
+            // Keep the map header transparent (full-bleed map); give timeline/codex
+            // a solid header on mobile so it's a clean bar, not a gray map void.
+            background: (isMobile && (currentPage === 'codex' || currentPage === 'timeline'))
+              ? theme.bg
+              : ((currentPage === 'map' || currentPage === 'codex' || currentPage === 'timeline') ? 'transparent' : (isMapDarkMode ? '#000000' : '#ffffff')),
             transition: 'background-color 0.3s ease'
           }}
         >
