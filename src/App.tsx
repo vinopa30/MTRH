@@ -6257,27 +6257,30 @@ function App() {
             }} />
           )}
           
-          {/* PROTECTIVE SIDE STRIPS */}
-          <motion.div 
+          {/* PROTECTIVE SIDE STRIPS — desktop only; they frame the collapsed
+              panel edge-tabs, which don't exist in the mobile full-width sheets. */}
+          {!isMobile && (<>
+          <motion.div
             initial={false}
-            animate={{ 
+            animate={{
               bottom: isTimelineCollapsed ? '0px' : '150px',
               background: theme.bg,
               borderColor: theme.border
             }}
             transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-            style={{ position: 'absolute', top: 0, left: 0, width: '20px', borderRight: '1px solid', borderTop: '1px solid', zIndex: 100, pointerEvents: 'auto' }} 
+            style={{ position: 'absolute', top: 0, left: 0, width: '20px', borderRight: '1px solid', borderTop: '1px solid', zIndex: 100, pointerEvents: 'auto' }}
           />
-          <motion.div 
+          <motion.div
             initial={false}
-            animate={{ 
+            animate={{
               bottom: isTimelineCollapsed ? '0px' : '150px',
               background: theme.bg,
               borderColor: theme.border
             }}
             transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-            style={{ position: 'absolute', top: 0, right: 0, width: '20px', borderLeft: '1px solid', borderTop: '1px solid', zIndex: 100, pointerEvents: 'auto' }} 
+            style={{ position: 'absolute', top: 0, right: 0, width: '20px', borderLeft: '1px solid', borderTop: '1px solid', zIndex: 100, pointerEvents: 'auto' }}
           />
+          </>)}
 
           {/* LEFT COMPONENT: FILTERS PANEL (desktop drawer) / LAYERS SHEET (mobile full-screen) */}
           <motion.div
