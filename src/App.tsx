@@ -21,7 +21,8 @@ const TimelinePage = lazy(() => import('./TimelinePage'));
 const CodexPage = lazy(() => import('./CodexPage'));
 import { TIMELINE_ITEMS, TIMELINE_LOCATIONS, BIBLICAL_TRAVEL_PATHS, Waypoint, TravelPath } from './timelineData';
 // import { ARCHAEOLOGICAL_FINDS_DATA } from './archaeologyData';
-import { TERM_TREE_DATA } from './termTreeData';
+// termTreeData (~1.86MB) is loaded dynamically below so it stays out of the
+// main chunk; the Codex/Timeline lazy pages import it in their own chunks.
 // import { MISSING_411_DATA } from './missing411Data';
 // import { CAVES_DATA } from './cavesData';
 
@@ -1107,6 +1108,20 @@ function App() {
 
   combinedDataRef.current = combinedPointsAndLinesData;
 
+  // The Codex term tree, loaded off the critical path (see deferred effect below).
+  const [termTreeData, setTermTreeData] = useState<any[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => import('./termTreeData').then(m => { if (!cancelled) setTermTreeData(m.TERM_TREE_DATA as any[]); });
+    const ric: any = (window as any).requestIdleCallback;
+    const handle = ric ? ric(load) : setTimeout(load, 200);
+    return () => {
+      cancelled = true;
+      const cancel: any = (window as any).cancelIdleCallback;
+      if (ric && cancel) cancel(handle); else clearTimeout(handle as any);
+    };
+  }, []);
+
   // Combine static Codex nodes and approved user Codex submissions
   const combinedCodexNodes = useMemo(() => {
     const approvedCodexSubmissions = approvedSubmissions.filter(item => 
@@ -1120,7 +1135,7 @@ function App() {
       sources: item.source ? [item.source] : [],
       layer: item.category || undefined
     }));
-    const rawNodes = [...TERM_TREE_DATA, ...approvedCodexSubmissions];
+    const rawNodes = [...termTreeData, ...approvedCodexSubmissions];
     return rawNodes.map((node: any) => {
       const override = overrides[String(node.id)];
       if (override) {
@@ -1131,7 +1146,12 @@ function App() {
       }
       return node;
     });
-  }, [approvedSubmissions, overrides]);
+  }, [termTreeData, approvedSubmissions, overrides]);
+
+  // Latest combined nodes for handlers that run outside React's render (e.g.
+  // the popstate URL sync), so a codex deep-link resolves once the tree loads.
+  const combinedCodexNodesRef = useRef<any[]>([]);
+  combinedCodexNodesRef.current = combinedCodexNodes;
 
   // Combine static Timeline items and approved user Timeline submissions
   const combinedTimelineItems = useMemo(() => {
@@ -3051,7 +3071,7 @@ function App() {
         setIsModeratorOpen(false);
         const termId = params.get('termId');
         if (termId) {
-          const matched = TERM_TREE_DATA.find(node => String(node.id) === termId);
+          const matched = combinedCodexNodesRef.current.find(node => String(node.id) === termId);
           if (matched) setSelectedCodexNode(matched);
         } else {
           setSelectedCodexNode(null);
@@ -3954,7 +3974,7 @@ function App() {
     };
 
     compileVerifiedIntel();
-  }, [rabbitHoleData, ufoData, archaeologyData, missing411Data, cavesData, alienAbductionData, cattleMutilationData, overrides]);
+  }, [rabbitHoleData, ufoData, archaeologyData, missing411Data, cavesData, alienAbductionData, cattleMutilationData, overrides, combinedCodexNodes]);
 
   useEffect(() => {
     if (uniqueCategories.length > 0 && !hasRandomizedRef.current) {
@@ -8709,7 +8729,7 @@ function App() {
         >
           {mountedPages.codex && <Suspense fallback={null}><CodexPage
             theme={theme}
-            codexNodes={combinedCodexNodes}
+            codexNodes={termTreeData.length ? combinedCodexNodes : undefined}
             isMapDarkMode={isMapDarkMode}
             isMobile={isMobile}
             focusedTermId={focusedCodexTermId}
