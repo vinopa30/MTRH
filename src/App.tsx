@@ -4231,14 +4231,21 @@ function App() {
     const urlLng = parseFloat(urlParams.get('lng') || '');
     const urlZoom = parseFloat(urlParams.get('zoom') || '');
 
+    const isTouchViewport = typeof window !== 'undefined' && window.innerWidth < 1024;
     const map = new mapboxgl.Map({
       container: mapContainer.current,
-      style: isMapDarkMode ? MAP_STYLE_DARK : MAP_STYLE_LIGHT, 
-      center: (!isNaN(urlLat) && !isNaN(urlLng)) ? [urlLng, urlLat] : [-98.5795, 39.8283], 
+      style: isMapDarkMode ? MAP_STYLE_DARK : MAP_STYLE_LIGHT,
+      center: (!isNaN(urlLat) && !isNaN(urlLng)) ? [urlLng, urlLat] : [-98.5795, 39.8283],
       zoom: !isNaN(urlZoom) ? urlZoom : 4.0,
       projection: { name: 'globe' } as any,
-      trackResize: true
+      trackResize: true,
+      // On touch, disable rotate/pitch so one-finger pan and pinch-zoom don't
+      // fight an accidental two-finger rotation; keeps the map gesture model simple.
+      ...(isTouchViewport ? { dragRotate: false, pitchWithRotate: false, touchPitch: false } : {})
     });
+    if (isTouchViewport) {
+      map.touchZoomRotate.disableRotation();
+    }
     mapRef.current = map;
 
     // Stop main map rotation on any user interaction
