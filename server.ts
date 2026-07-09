@@ -1101,7 +1101,9 @@ ${modLink}
   if (!isProduction) {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      // allowedHosts:true lets tunnels (e.g. *.trycloudflare.com) reach the dev
+      // server; the host-check is a dev-only guard and we intentionally share it.
+      server: { middlewareMode: true, allowedHosts: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
