@@ -3212,6 +3212,7 @@ function App() {
     { isOpen: isSubmitOpen, close: () => setIsSubmitOpen(false) },
     { isOpen: isReportOpen, close: () => setIsReportOpen(false) },
     { isOpen: showAboutModal, close: () => setShowAboutModal(false) },
+    { isOpen: !isLeftCollapsed, close: () => setIsLeftCollapsed(true) },
     { isOpen: !isRightCollapsed, close: () => setIsRightCollapsed(true) },
   ]);
 
