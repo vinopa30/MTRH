@@ -9454,8 +9454,8 @@ function App() {
               backgroundImage: 'url("https://raw.githubusercontent.com/northbeastclothing-design/MTRH/main/public/overlay-map-bg-%402x.png")',
               backgroundSize: '100% 100%',
               backgroundPosition: 'center',
-              height: '208px',
-              minHeight: '208px',
+              height: isMobile ? '140px' : '208px',
+              minHeight: isMobile ? '140px' : '208px',
               width: '100%',
               display: 'flex',
               alignItems: 'center',
@@ -9488,27 +9488,29 @@ function App() {
               <img 
                 src="https://raw.githubusercontent.com/northbeastclothing-design/MTRH/main/public/overlay-icons-%402x.png" 
                 alt="Icons Grid" 
-                style={{ 
+                style={{
                   position: 'absolute',
                   right: '0',
                   top: '0',
-                  width: '312px',
-                  height: '208px',
+                  width: isMobile ? '210px' : '312px',
+                  height: isMobile ? '140px' : '208px',
                   zIndex: 2,
                   objectFit: 'contain'
-                }} 
+                }}
                 referrerPolicy="no-referrer"
               />
             </div>
             
-            {/* BOTTOM SECTION CONTENT: remaining height is 268px */}
+            {/* BOTTOM SECTION CONTENT: scrolls so the ENTER button is always reachable */}
             <div style={{
-              padding: '40px 0',
+              padding: isMobile ? '24px 0' : '40px 0',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
               flex: 1,
-              justifyContent: 'center'
+              minHeight: 0,
+              overflowY: 'auto',
+              justifyContent: isMobile ? 'flex-start' : 'center'
             }}>
               <h2 style={{
                 fontFamily: '"Space Mono", monospace',
