@@ -2972,6 +2972,9 @@ function App() {
   const [isLeftCollapsed, setIsLeftCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 1024);
   const [isRightCollapsed, setIsRightCollapsed] = useState(true);
   const [isTimelineCollapsed, setIsTimelineCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 1024);
+  // Mobile dossier bottom-sheet snap height; drag handle toggles/dismisses it.
+  const [mobileSheetSnap, setMobileSheetSnap] = useState<'half' | 'full'>('half');
+  const sheetDragStartRef = useRef<{ y: number; moved: boolean }>({ y: 0, moved: false });
   const [hoveredBucket, setHoveredBucket] = useState<{
     count: number;
     cat: string;
@@ -4971,6 +4974,7 @@ function App() {
 
     setSelectedFeature(feature);
     setIsRightCollapsed(false);
+    setMobileSheetSnap('half'); // open the mobile sheet at peek height
     setActiveWaypointIndex(null);
 
     // Auto-expand the categories this location belongs to in the sidebar
@@ -6815,10 +6819,16 @@ function App() {
             </div>
           </motion.div>
 
-          {/* RIGHT COMPONENT: DOSSIER SIDEBAR WINDOW PANEL */}
+          {/* RIGHT COMPONENT: DOSSIER SIDEBAR (desktop) / BOTTOM SHEET (mobile) */}
           <motion.div
             initial={false}
-            animate={{
+            animate={isMobile ? {
+              y: isRightCollapsed ? '110%' : '0%',
+              height: mobileSheetSnap === 'full' ? '90vh' : '52vh',
+              background: theme.bg,
+              borderColor: theme.border,
+              opacity: 1
+            } : {
               right: isRightCollapsed ? collapsedPanelOffset : 20,
               bottom: (isTimelineCollapsed ? 0 : 150) + tabBarOffset,
               background: theme.bg,
@@ -6827,18 +6837,36 @@ function App() {
             }}
             transition={{
               right: { type: 'spring', stiffness: 240, damping: 28 },
+              y: { type: 'spring', stiffness: 320, damping: 34 },
               default: { duration: 0.5, ease: [0.16, 1, 0.3, 1] }
             }}
-            style={{
+            style={isMobile ? {
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              bottom: tabBarOffset,
+              width: '100%',
+              borderTop: '1px solid',
+              borderTopLeftRadius: '16px',
+              borderTopRightRadius: '16px',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              zIndex: 40,
+              fontFamily: '"Space Mono", monospace',
+              pointerEvents: 'auto',
+              color: theme.text,
+              boxShadow: '0 -8px 24px rgba(0,0,0,0.35)'
+            } : {
               position: 'absolute',
               top: 0,
               width: `${sidePanelWidth}px`,
               borderLeft: '1px solid',
               borderTop: '1px solid',
-              display: 'flex', 
-              flexDirection: 'column', 
-              overflow: 'visible', 
-              zIndex: 10, 
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'visible',
+              zIndex: 10,
               fontFamily: '"Space Mono", monospace',
               pointerEvents: 'auto',
               color: theme.text
@@ -6859,12 +6887,56 @@ function App() {
               }} />
             )}
             
-            {/* ABSOLUTE POSITIONED FIXED BLACK TAB FOR RIGHT SIDEBAR */}
-            <motion.button 
+            {/* MOBILE DRAG HANDLE — tap toggles half/full, drag down shrinks/dismisses, up expands */}
+            {isMobile && (
+              <div
+                onPointerDown={(e) => {
+                  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                  sheetDragStartRef.current = { y: e.clientY, moved: false };
+                }}
+                onPointerMove={(e) => {
+                  if (Math.abs(e.clientY - sheetDragStartRef.current.y) > 6) sheetDragStartRef.current.moved = true;
+                }}
+                onPointerUp={(e) => {
+                  const dy = e.clientY - sheetDragStartRef.current.y;
+                  if (!sheetDragStartRef.current.moved) {
+                    // Tap: cycle snap height.
+                    setMobileSheetSnap(prev => (prev === 'half' ? 'full' : 'half'));
+                  } else if (dy > 70) {
+                    // Drag down: collapse from half, or step full -> half.
+                    if (mobileSheetSnap === 'full') setMobileSheetSnap('half');
+                    else setIsRightCollapsed(true);
+                  } else if (dy < -70) {
+                    setMobileSheetSnap('full');
+                  }
+                }}
+                style={{
+                  flexShrink: 0,
+                  height: '34px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '4px',
+                  cursor: 'grab',
+                  touchAction: 'none',
+                  background: theme.bg,
+                  borderTopLeftRadius: '16px',
+                  borderTopRightRadius: '16px'
+                }}
+              >
+                <div style={{ width: '40px', height: '4px', borderRadius: '2px', background: theme.textDim }} />
+                <span style={{ fontSize: '7.5px', letterSpacing: '0.3em', color: theme.textDim }}>— CASE FILE —</span>
+              </div>
+            )}
+
+            {/* ABSOLUTE POSITIONED FIXED BLACK TAB FOR RIGHT SIDEBAR (desktop only) */}
+            <motion.button
               whileHover={{ opacity: 0.8 }}
               onClick={() => setIsRightCollapsed(!isRightCollapsed)}
               title={isRightCollapsed ? "Maximize Dossier" : "Minimize Dossier"}
               style={{
+                display: isMobile ? 'none' : 'flex',
                 position: 'absolute',
                 top: '-1px',
                 left: '-20px',
@@ -6875,7 +6947,6 @@ function App() {
                 border: 'none',
                 cursor: 'pointer',
                 zIndex: 25,
-                display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 padding: 0
