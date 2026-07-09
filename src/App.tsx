@@ -6193,10 +6193,15 @@ function App() {
           <MobileTabBar currentPage={currentPage} setCurrentPage={setCurrentPage} theme={theme} />
         )}
 
-        {/* MOBILE FLOATING LAYERS BUTTON — opens the layers sheet on the map */}
-        {isMobile && currentPage === 'map' && isLeftCollapsed && (
-          <button
-            onClick={() => setIsLeftCollapsed(false)}
+        {/* MOBILE FLOATING LAYERS BUTTON — toggles the layers sheet. When open it
+            slides 2/3 off to the left leaving a caret pull-tab; tapping it closes
+            the sheet and slides the button back out. */}
+        {isMobile && currentPage === 'map' && (
+          <motion.button
+            onClick={() => setIsLeftCollapsed(v => !v)}
+            initial={false}
+            animate={{ x: isLeftCollapsed ? 0 : '-66%' }}
+            transition={{ type: 'spring', stiffness: 320, damping: 34 }}
             style={{
               position: 'fixed',
               left: '16px',
@@ -6215,12 +6220,15 @@ function App() {
               fontSize: '11px',
               fontWeight: 700,
               letterSpacing: '0.08em',
-              cursor: 'pointer'
+              cursor: 'pointer',
+              whiteSpace: 'nowrap'
             }}
           >
             <img src="/icons/icon-filter.svg" style={{ width: '16px', height: '16px', filter: theme.invert }} alt="" />
             LAYERS ({Object.values(activeLayers).filter(Boolean).length})
-          </button>
+            {/* Caret pull-tab: the part left visible when the button is slid off */}
+            <span style={{ fontSize: '14px', lineHeight: 1, paddingLeft: '2px' }}>{isLeftCollapsed ? '' : '›'}</span>
+          </motion.button>
         )}
 
         {/* CORE WORKSPACE FRAMING GRID — NOW FULL BLEED OVERLAY ENVIRONMENT */}
