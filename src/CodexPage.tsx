@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { X, Flag, Play } from 'lucide-react';
 import { TERM_TREE_DATA, TermNode, TranslationInfo } from './termTreeData';
 import { TIMELINE_LOCATIONS } from './timelineData';
+import MobileCodex from './mobile/MobileCodex';
 
 interface CodexPageProps {
   theme: {
@@ -17,6 +18,7 @@ interface CodexPageProps {
     invert: string;
   };
   isMapDarkMode: boolean;
+  isMobile?: boolean;
   onViewOnMap: (layerName: string, featureSearchTerm?: string) => void;
   onViewOnTimeline: (timelineId: string) => void;
   onFlagItem?: (item: TermNode) => void;
@@ -591,6 +593,7 @@ const toTitleCase = (str: string) => {
 export default function CodexPage({
   theme,
   isMapDarkMode,
+  isMobile = false,
   onViewOnMap,
   onViewOnTimeline,
   onFlagItem,
@@ -1702,9 +1705,25 @@ export default function CodexPage({
         }
       `}</style>
 
-      {/* FLOATING SEARCH BAR IN THE TOP LEFT (separate from canvas) */}
-      <div 
-        style={{ 
+      {/* MOBILE: case-file drill-down replaces the pannable canvas */}
+      {isMobile && (
+        <MobileCodex
+          theme={theme}
+          nodes={nodes}
+          columns={columns}
+          selectedPath={selectedPath}
+          onNodeTap={(node, level) => { handleNodeClick(node, level); setIsRightCollapsed(false); }}
+          onCrumbTap={(index) => setSelectedPath(selectedPath.slice(0, index + 1))}
+          onReset={() => setSelectedPath([])}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+        />
+      )}
+
+      {/* FLOATING SEARCH BAR IN THE TOP LEFT (separate from canvas) — desktop only */}
+      {!isMobile && (<>
+      <div
+        style={{
           position: 'absolute',
           top: '20px',
           left: '32px',
@@ -2207,42 +2226,74 @@ export default function CodexPage({
         </svg>
         </div>
       </div>
+      </>)}
 
-      {/* RIGHT SIDEBAR: DOSSIER SIDEBAR WINDOW PANEL */}
-      <motion.div 
+      {/* RIGHT SIDEBAR (desktop) / FULL-SCREEN TERM DOSSIER (mobile) */}
+      <motion.div
         initial={false}
-        animate={{ 
+        animate={isMobile ? {
+          x: isRightCollapsed ? '110%' : '0%',
+          background: isMapDarkMode ? 'rgba(10, 10, 10, 0.96)' : 'rgba(255, 255, 255, 0.96)',
+          borderColor: theme.border,
+          opacity: 1
+        } : {
           right: isRightCollapsed ? -280 : 20,
           background: isMapDarkMode ? 'rgba(10, 10, 10, 0.85)' : 'rgba(255, 255, 255, 0.85)',
           borderColor: theme.border,
           opacity: 1
         }}
-        transition={{ 
+        transition={{
           right: { type: 'spring', stiffness: 240, damping: 28 },
+          x: { type: 'spring', stiffness: 320, damping: 34 },
           default: { duration: 0.5, ease: [0.16, 1, 0.3, 1] }
         }}
-        style={{ 
+        style={isMobile ? {
+          position: 'absolute',
+          top: 0,
+          bottom: 0,
+          left: 0,
+          right: 0,
+          width: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          zIndex: 50,
+          fontFamily: '"Space Mono", monospace',
+          pointerEvents: 'auto',
+          color: theme.text,
+          backdropFilter: 'blur(8px)'
+        } : {
           position: 'absolute',
           top: 0,
           bottom: 0,
           width: '300px',
           borderLeft: `1px solid ${theme.border}`,
-          display: 'flex', 
-          flexDirection: 'column', 
-          overflow: 'visible', 
-          zIndex: 15, 
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'visible',
+          zIndex: 15,
           fontFamily: '"Space Mono", monospace',
           pointerEvents: 'auto',
           color: theme.text,
           backdropFilter: 'blur(8px)'
         }}
       >
+        {/* MOBILE: back-to-list bar for the term dossier */}
+        {isMobile && (
+          <button
+            onClick={() => setIsRightCollapsed(true)}
+            style={{ flexShrink: 0, height: '40px', display: 'flex', alignItems: 'center', gap: '8px', padding: '0 14px', background: theme.bg, border: 'none', borderBottom: `1px solid ${theme.border}`, color: theme.text, fontFamily: '"Space Mono", monospace', fontSize: '10px', letterSpacing: '0.12em', cursor: 'pointer' }}
+          >
+            ‹ BACK TO INDEX
+          </button>
+        )}
         {/* ABSOLUTE POSITIONED FIXED TAB FOR RIGHT SIDEBAR */}
-        <motion.button 
+        <motion.button
           whileHover={{ opacity: 0.8 }}
           onClick={() => setIsRightCollapsed(!isRightCollapsed)}
           title={isRightCollapsed ? "Maximize Dossier" : "Minimize Dossier"}
           style={{
+            display: isMobile ? 'none' : 'flex',
             position: 'absolute',
             top: '-1px',
             left: '-20px',
@@ -2253,7 +2304,6 @@ export default function CodexPage({
             border: 'none',
             cursor: 'pointer',
             zIndex: 25,
-            display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             padding: 0

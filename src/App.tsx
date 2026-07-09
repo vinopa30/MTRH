@@ -8681,6 +8681,7 @@ function App() {
             theme={theme}
             codexNodes={combinedCodexNodes}
             isMapDarkMode={isMapDarkMode}
+            isMobile={isMobile}
             focusedTermId={focusedCodexTermId}
             onFocusedTermConsumed={() => setFocusedCodexTermId(null)}
             onViewOnMap={(layerName, featureSearchTerm) => {
