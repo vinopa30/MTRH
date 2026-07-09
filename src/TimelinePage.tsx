@@ -188,6 +188,10 @@ export default function TimelinePage({
   // so the year window zooms around the pinch midpoint.
   const activePointersRef = useRef<Map<number, number>>(new Map());
   const pinchRef = useRef<{ dist: number; anchorYear: number; anchorFrac: number; span: number } | null>(null);
+  // Baselines for a one-finger drag: horizontal pans the year window, vertical
+  // scrolls the era tracks (handled in JS so the drag is reliable on touch).
+  const dragStartYRef = useRef(0);
+  const dragStartScrollTopRef = useRef(0);
   // Mobile: collapse the search/zoom/reset controls behind a caret so the
   // timeline itself always has room.
   const [controlsOpen, setControlsOpen] = useState(true);
@@ -444,6 +448,9 @@ export default function TimelinePage({
     setIsDragging(true);
     setStartX(e.clientX);
     setStartViewStart(viewStart);
+    dragStartYRef.current = e.clientY;
+    dragStartScrollTopRef.current = scrollContainerRef.current?.scrollTop ?? 0;
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch {}
     hasDraggedRef.current = false;
   };
 
@@ -467,7 +474,8 @@ export default function TimelinePage({
     }
     if (!isDragging || !scrollContainerRef.current) return;
     const deltaX = e.clientX - startX;
-    if (Math.abs(deltaX) > 5) {
+    const deltaY = e.clientY - dragStartYRef.current;
+    if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
       hasDraggedRef.current = true;
     }
     const viewportWidth = scrollContainerRef.current.clientWidth;
@@ -477,11 +485,13 @@ export default function TimelinePage({
     const newStart = startViewStart - deltaYears;
     const currentSpan = viewEnd - viewStart;
 
-    // Bounds clamping
+    // Horizontal: pan the year window.
     const clampedStart = Math.max(-250000, Math.min(3500 - currentSpan, newStart));
-
     setViewStart(clampedStart);
     setViewEnd(clampedStart + currentSpan);
+
+    // Vertical: scroll the era tracks (we own the gesture, so do it manually).
+    scrollContainerRef.current.scrollTop = dragStartScrollTopRef.current - deltaY;
   };
 
   const handleMouseUpOrLeave = (e: React.PointerEvent) => {
@@ -931,8 +941,9 @@ export default function TimelinePage({
           overflowY: 'auto',
           cursor: isDragging ? 'grabbing' : 'grab',
           userSelect: 'none',
-          // Let the browser own vertical scroll (between tracks); we pan years horizontally.
-          touchAction: 'pan-y'
+          // We own the gesture in JS (horizontal = pan years, vertical = scroll
+          // tracks), so disable the browser's touch panning entirely.
+          touchAction: 'none'
         }}
       >
         <div style={{ minWidth: '100%', height: `${Math.max(400, trackOffsets.totalHeight)}px`, position: 'relative' }}>
