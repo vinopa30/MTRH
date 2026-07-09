@@ -1340,6 +1340,12 @@ function App() {
   const [isTimelineDragging, setIsTimelineDragging] = useState(false);
   const [dragStartX, setDragStartX] = useState(0);
   const [dragStartTimelineStart, setDragStartTimelineStart] = useState(0);
+  // Refs mirror the drag state so pointer-move reads current values immediately
+  // (state updates lag a render, which dropped the first touch-move and made the
+  // scrubber feel unresponsive).
+  const isTimelineDraggingRef = useRef(false);
+  const dragStartXRef = useRef(0);
+  const dragStartTimelineStartRef = useRef(0);
   const timelineRef = useRef<HTMLDivElement>(null);
   
   const [selectedFeature, setSelectedFeature] = useState<any>(null);
@@ -8266,24 +8272,25 @@ function App() {
               onPointerDown={(e) => {
                 if (e.target instanceof HTMLInputElement) return; // Don't drag if clicking sliders
                 e.currentTarget.setPointerCapture(e.pointerId);
+                isTimelineDraggingRef.current = true;
+                dragStartXRef.current = e.clientX;
+                dragStartTimelineStartRef.current = timelineWindowStart;
                 setIsTimelineDragging(true);
-                setDragStartX(e.clientX);
-                setDragStartTimelineStart(timelineWindowStart);
               }}
               onPointerMove={(e) => {
-                if (!isTimelineDragging || !timelineRef.current) return;
-                const deltaX = e.clientX - dragStartX;
+                if (!isTimelineDraggingRef.current || !timelineRef.current) return;
+                const deltaX = e.clientX - dragStartXRef.current;
                 const pixelWidth = timelineRef.current.clientWidth;
                 const yearsPerPixel = timelineWindowSpan / pixelWidth;
                 const yearDelta = deltaX * yearsPerPixel;
 
-                let newStart = dragStartTimelineStart - yearDelta;
+                let newStart = dragStartTimelineStartRef.current - yearDelta;
                 // Constrain
                 newStart = Math.max(timeBounds.min, Math.min(timeBounds.max - timelineWindowSpan, newStart));
                 setTimelineWindowStart(newStart);
               }}
-              onPointerUp={() => setIsTimelineDragging(false)}
-              onPointerCancel={() => setIsTimelineDragging(false)}
+              onPointerUp={() => { isTimelineDraggingRef.current = false; setIsTimelineDragging(false); }}
+              onPointerCancel={() => { isTimelineDraggingRef.current = false; setIsTimelineDragging(false); }}
             >
               
               {/* Pan is drag-only now (circle arrow buttons removed). */}
