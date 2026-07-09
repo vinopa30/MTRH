@@ -6200,7 +6200,11 @@ function App() {
           <motion.button
             onClick={() => setIsLeftCollapsed(v => !v)}
             initial={false}
-            animate={{ x: isLeftCollapsed ? 0 : '-66%' }}
+            animate={{
+              x: isLeftCollapsed ? 0 : '-66%',
+              // Ride up above the map timeline scrubber (150px) when it opens.
+              y: isTimelineCollapsed ? 0 : -150
+            }}
             transition={{ type: 'spring', stiffness: 320, damping: 34 }}
             style={{
               position: 'fixed',
@@ -8161,19 +8165,25 @@ function App() {
               />
             </motion.button>
 
-                  <div style={{ 
-                    height: '40px', 
-                    borderBottom: `1px solid ${theme.border}`, 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    padding: '0 24px', 
-                    background: isMapDarkMode ? theme.bg : '#ffffff', 
-                    position: 'relative' 
+                  <div style={{
+                    height: '40px',
+                    borderBottom: `1px solid ${theme.border}`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    padding: isMobile ? '0 12px' : '0 24px',
+                    background: isMapDarkMode ? theme.bg : '#ffffff',
+                    position: 'relative'
                   }}>
-                    <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: '0px' }}>
+                    {/* Centered title hidden on mobile: it collided with the right-side
+                        zoom slider, whose track line struck through the text. */}
+                    <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', display: isMobile ? 'none' : 'flex', alignItems: 'center', gap: '0px' }}>
                       <img src="/icons/icon-timeline.svg" style={{ width: '30px', height: '30px', filter: theme.invert }} alt="timeline" />
                       <span style={{ fontWeight: '700', fontSize: '20px', letterSpacing: '1px', textTransform: 'uppercase' }}>TIMELINE</span>
                     </div>
+                    {/* Mobile: small left-aligned label instead of the centered one */}
+                    {isMobile && (
+                      <span style={{ fontWeight: 700, fontSize: '11px', letterSpacing: '0.14em', textTransform: 'uppercase' }}>TIMELINE</span>
+                    )}
                     
                     <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
                       {/* ZOOM SLIDER AREA */}
@@ -8346,6 +8356,21 @@ function App() {
                       return ((year - timelineWindowStart) / timelineWindowSpan) * 100;
                     };
 
+                    // Only label major ticks that are far enough apart, so year
+                    // labels never smear together (min gap wider on mobile).
+                    const minLabelGapPct = isMobile ? 22 : 8;
+                    const labelYears = new Set<number>();
+                    let lastLabelX = -Infinity;
+                    for (const y of years) {
+                      if (y % majorInterval !== 0) continue;
+                      const x = getX(y);
+                      if (x < 0 || x > 100) continue;
+                      if (x - lastLabelX >= minLabelGapPct) {
+                        labelYears.add(y);
+                        lastLabelX = x;
+                      }
+                    }
+
                     return (
                       <>
                         {/* YEAR LABELS AND DIVIDERS */}
@@ -8365,7 +8390,7 @@ function App() {
                                 background: isMajor ? theme.text : (isMapDarkMode ? '#444' : '#ccc'),
                                 zIndex: 0 // Behind baseline
                               }} />
-                              {isMajor && (
+                              {isMajor && labelYears.has(y) && (
                                 <div style={{
                                   position: 'absolute',
                                   left: `${getX(y)}%`,
@@ -8374,7 +8399,8 @@ function App() {
                                   fontSize: '10px',
                                   fontWeight: 'bold',
                                   color: theme.text,
-                                  zIndex: 1
+                                  zIndex: 1,
+                                  whiteSpace: 'nowrap'
                                 }}>
                                   {y}
                                 </div>
