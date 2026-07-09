@@ -8637,6 +8637,7 @@ function App() {
           {mountedPages.timeline && <Suspense fallback={null}><TimelinePage
             theme={theme}
             isMapDarkMode={isMapDarkMode}
+            isMobile={isMobile}
             timelineItems={combinedTimelineItems}
             selectedItem={selectedTimelineItem}
             setSelectedItem={setSelectedTimelineItem}

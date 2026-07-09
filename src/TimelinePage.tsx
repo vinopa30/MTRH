@@ -15,6 +15,7 @@ interface TimelinePageProps {
     invert: string;
   };
   isMapDarkMode: boolean;
+  isMobile?: boolean;
   selectedItem: TimelineItem | null;
   setSelectedItem: (item: TimelineItem | null) => void;
   onViewOnMap: (item: TimelineItem) => void;
@@ -170,6 +171,7 @@ const ERAS_CONFIG = [
 export default function TimelinePage({
   theme,
   isMapDarkMode,
+  isMobile = false,
   selectedItem,
   setSelectedItem,
   onViewOnMap,
@@ -413,15 +415,16 @@ export default function TimelinePage({
   }, [initialMaximizedEraId]);
 
   // Drag Handlers
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button !== 0) return; // Left click only
+  // Pointer events cover mouse AND touch, so the year window pans by finger drag.
+  const handleMouseDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return; // Primary pointer only
     setIsDragging(true);
     setStartX(e.clientX);
     setStartViewStart(viewStart);
     hasDraggedRef.current = false;
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
+  const handleMouseMove = (e: React.PointerEvent) => {
     if (!isDragging || !scrollContainerRef.current) return;
     const deltaX = e.clientX - startX;
     if (Math.abs(deltaX) > 5) {
@@ -430,21 +433,23 @@ export default function TimelinePage({
     const viewportWidth = scrollContainerRef.current.clientWidth;
     const yearsPerPixel = span / viewportWidth;
     const deltaYears = deltaX * yearsPerPixel;
-    
+
     const newStart = startViewStart - deltaYears;
     const currentSpan = viewEnd - viewStart;
-    
+
     // Bounds clamping
     const clampedStart = Math.max(-250000, Math.min(3500 - currentSpan, newStart));
-    
+
     setViewStart(clampedStart);
     setViewEnd(clampedStart + currentSpan);
   };
 
-  const handleMouseUpOrLeave = (e: React.MouseEvent) => {
+  const handleMouseUpOrLeave = (e: React.PointerEvent) => {
     setIsDragging(false);
-    if (e.type === 'mouseup' && !hasDraggedRef.current && selectedItem) {
-      setSelectedItem(null);
+    if ((e.type === 'pointerup' || e.type === 'mouseup') && !hasDraggedRef.current) {
+      // Tap on empty track space clears selection and (mobile) the trace.
+      if (selectedItem) setSelectedItem(null);
+      if (isMobile) setHoveredItemId(null);
     }
   };
 
@@ -850,19 +855,21 @@ export default function TimelinePage({
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: isMapDarkMode ? 'rgba(0, 0, 0, 0.85)' : 'rgba(255, 255, 255, 0.85)', color: theme.text, overflow: 'hidden', borderTop: `1px solid ${theme.border}`, position: 'relative' }}>
       
       {/* TIMELINE VIEWPORT SCROLLER (TOP/CENTER) */}
-      <div 
+      <div
         ref={scrollContainerRef}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUpOrLeave}
-        onMouseLeave={handleMouseUpOrLeave}
+        onPointerDown={handleMouseDown}
+        onPointerMove={handleMouseMove}
+        onPointerUp={handleMouseUpOrLeave}
+        onPointerLeave={handleMouseUpOrLeave}
         className="custom-sidebar-scrollbar"
         style={{
           flex: 1,
           overflowX: 'hidden',
           overflowY: 'auto',
           cursor: isDragging ? 'grabbing' : 'grab',
-          userSelect: 'none'
+          userSelect: 'none',
+          // Let the browser own vertical scroll (between tracks); we pan years horizontally.
+          touchAction: 'pan-y'
         }}
       >
         <div style={{ minWidth: '100%', height: `${Math.max(400, trackOffsets.totalHeight)}px`, position: 'relative' }}>
@@ -1162,12 +1169,14 @@ export default function TimelinePage({
                           return (
                             <React.Fragment key={item.id}>
                               <div
-                                onMouseEnter={() => setHoveredItemId(item.id)}
-                                onMouseLeave={() => setHoveredItemId(null)}
-                                onMouseDown={(e) => e.stopPropagation()}
+                                onMouseEnter={() => { if (!isMobile) setHoveredItemId(item.id); }}
+                                onMouseLeave={() => { if (!isMobile) setHoveredItemId(null); }}
+                                onPointerDown={(e) => e.stopPropagation()}
                                 onMouseUp={(e) => e.stopPropagation()}
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  // On touch there's no hover, so tap drives the trace/relationship lines.
+                                  if (isMobile) setHoveredItemId(item.id);
                                   handleItemClick(item);
                                 }}
                                 style={{
@@ -1255,12 +1264,13 @@ export default function TimelinePage({
                           return (
                             <div
                               key={item.id}
-                              onMouseEnter={() => setHoveredItemId(item.id)}
-                              onMouseLeave={() => setHoveredItemId(null)}
-                              onMouseDown={(e) => e.stopPropagation()}
+                              onMouseEnter={() => { if (!isMobile) setHoveredItemId(item.id); }}
+                              onMouseLeave={() => { if (!isMobile) setHoveredItemId(null); }}
+                              onPointerDown={(e) => e.stopPropagation()}
                               onMouseUp={(e) => e.stopPropagation()}
                               onClick={(e) => {
                                 e.stopPropagation();
+                                if (isMobile) setHoveredItemId(item.id);
                                 handleItemClick(item);
                               }}
                               style={{
