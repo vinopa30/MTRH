@@ -637,6 +637,25 @@ export default function TimelinePage({
     return { list, majorInterval, mediumInterval };
   }, [viewStart, viewEnd, span]);
 
+  // Which major ticks actually get a year label. Rendering every major tick
+  // smears the labels together on a narrow screen, so keep a minimum horizontal
+  // gap between labels (wider on mobile, where the viewport is small).
+  const labeledYears = useMemo(() => {
+    const minGapPct = isMobile ? 20 : 7;
+    const set = new Set<number>();
+    let lastX = -Infinity;
+    for (const y of ticks.list) {
+      if (y % ticks.majorInterval !== 0) continue;
+      const x = ((y - viewStart) / span) * 100;
+      if (x < 0 || x > 100) continue;
+      if (x - lastX >= minGapPct) {
+        set.add(y);
+        lastX = x;
+      }
+    }
+    return set;
+  }, [ticks, viewStart, span, isMobile]);
+
   // Helper to find the closest event offscreen for a specific era
   const getEraOffscreenNav = (eraId: string) => {
     const items = eraItemsMap[eraId] || [];
@@ -1881,7 +1900,7 @@ export default function TimelinePage({
                 background: isMajor ? theme.text : (isMapDarkMode ? '#444' : '#ccc')
               }} />
               
-              {isMajor && (
+              {isMajor && labeledYears.has(y) && (
                 <div style={{
                   position: 'absolute',
                   left: `${xPos}%`,
@@ -1890,7 +1909,8 @@ export default function TimelinePage({
                   fontSize: '9px',
                   fontWeight: 'bold',
                   fontFamily: '"Space Mono", monospace',
-                  color: theme.text
+                  color: theme.text,
+                  whiteSpace: 'nowrap'
                 }}>
                   {formatYear(y)}
                 </div>

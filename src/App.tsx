@@ -5867,12 +5867,17 @@ function App() {
         )}
       </AnimatePresence>
 
-      <div 
-        style={{ 
-          height: '100vh', 
-          display: 'flex', 
-          flexDirection: 'column', 
-          position: 'relative', 
+      <div
+        style={{
+          // Use the dynamic viewport height on mobile so the app fills exactly
+          // the visible area — 100vh on iOS Safari is taller than what's visible
+          // (it ignores the URL bar), which caused the whole page to scroll and
+          // drag the header off-screen. 100dvh keeps the header pinned at the top
+          // and the date ruler/controls pinned at the bottom.
+          height: isMobile ? '100dvh' : '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          position: 'relative',
           overflow: 'hidden',
           background: isMapDarkMode ? '#000000' : '#ffffff',
           transition: 'background-color 0.3s ease'
