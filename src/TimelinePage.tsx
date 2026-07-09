@@ -1886,14 +1886,18 @@ export default function TimelinePage({
 
       </div>
 
-      {/* MOBILE: black square tab (same as the map timeline) at the top of the
-          lower section — pulls the search/span/reset controls up and down. */}
+      {/* MOBILE: black square tab (same as the map timeline). Zero-height anchor
+          so the box hangs over the content above with no full-width background. */}
       {isMobile && (
-        <div style={{ flexShrink: 0, height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderTop: `1px solid ${theme.border}` }}>
+        <div style={{ position: 'relative', height: 0, zIndex: 30, pointerEvents: 'none' }}>
           <button
             onClick={() => setControlsOpen(o => !o)}
             aria-label={controlsOpen ? 'Hide controls' : 'Show controls'}
             style={{
+              position: 'absolute',
+              bottom: '2px',
+              left: '50%',
+              transform: 'translateX(-50%)',
               width: '44px',
               height: '22px',
               background: theme.text,
@@ -1903,7 +1907,8 @@ export default function TimelinePage({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              padding: 0
+              padding: 0,
+              pointerEvents: 'auto'
             }}
           >
             <img
