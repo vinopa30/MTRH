@@ -1886,6 +1886,41 @@ export default function TimelinePage({
 
       </div>
 
+      {/* MOBILE: black square tab (same as the map timeline) at the top of the
+          lower section — pulls the search/span/reset controls up and down. */}
+      {isMobile && (
+        <div style={{ flexShrink: 0, height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderTop: `1px solid ${theme.border}` }}>
+          <button
+            onClick={() => setControlsOpen(o => !o)}
+            aria-label={controlsOpen ? 'Hide controls' : 'Show controls'}
+            style={{
+              width: '44px',
+              height: '22px',
+              background: theme.text,
+              color: theme.bg,
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 0
+            }}
+          >
+            <img
+              src="/icons/icon-arrow-left.svg"
+              alt="toggle"
+              style={{
+                width: '7px',
+                height: '13px',
+                // up arrow when controls hidden (pull up), down when shown
+                transform: controlsOpen ? 'rotate(270deg)' : 'rotate(90deg)',
+                filter: isMapDarkMode ? 'brightness(0)' : 'none'
+              }}
+            />
+          </button>
+        </div>
+      )}
+
       {/* LOCKED YEAR RULER (BOTTOM) */}
       <div style={{ 
         height: '42px', 
@@ -1933,41 +1968,6 @@ export default function TimelinePage({
           );
         })}
       </div>
-
-      {/* MOBILE: black square tab (same as the map timeline) to pull the search/
-          span/reset controls up and down. */}
-      {isMobile && (
-        <div style={{ flexShrink: 0, height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderTop: controlsOpen ? 'none' : `1px solid ${theme.border}` }}>
-          <button
-            onClick={() => setControlsOpen(o => !o)}
-            aria-label={controlsOpen ? 'Hide controls' : 'Show controls'}
-            style={{
-              width: '44px',
-              height: '22px',
-              background: theme.text,
-              color: theme.bg,
-              border: 'none',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: 0
-            }}
-          >
-            <img
-              src="/icons/icon-arrow-left.svg"
-              alt="toggle"
-              style={{
-                width: '7px',
-                height: '13px',
-                // up arrow when controls hidden (pull up), down when shown
-                transform: controlsOpen ? 'rotate(270deg)' : 'rotate(90deg)',
-                filter: isMapDarkMode ? 'brightness(0)' : 'none'
-              }}
-            />
-          </button>
-        </div>
-      )}
 
       {/* BOTTOM CONTROLS PANEL (BOTTOM BAR) */}
       <div
