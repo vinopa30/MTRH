@@ -6732,7 +6732,7 @@ function App() {
                                 }} />
                               </div>
                             ) : (
-                              <img src={isActive ? "https://raw.githubusercontent.com/northbeastclothing-design/MTRH/main/public/icons/icon-eye-open.svg" : "https://raw.githubusercontent.com/northbeastclothing-design/MTRH/main/public/icons/icon-eye-closed.svg"} style={{ width: '31px', height: '30px', filter: theme.invert }} alt="toggle" />
+                              <img src={isActive ? "/icons/icon-eye-open.svg" : "/icons/icon-eye-closed.svg"} style={{ width: '31px', height: '30px', filter: theme.invert }} alt="toggle" />
                             )}
                           </motion.button>
                           <motion.button 
@@ -6740,7 +6740,7 @@ function App() {
                             onClick={() => setExpandedLayers(p => ({ ...p, [layerName]: !isExpanded }))}
                             style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, width: '30px', height: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                           >
-                            <img src={isExpanded ? "https://raw.githubusercontent.com/northbeastclothing-design/MTRH/main/public/icons/icon-arrow-up.svg" : "https://raw.githubusercontent.com/northbeastclothing-design/MTRH/main/public/icons/icon-arrow-down.svg"} style={{ width: '30px', height: '30px', filter: theme.invert }} alt="expand" />
+                            <img src="/icons/icon-arrow-down.svg" style={{ width: '30px', height: '30px', filter: theme.invert, transform: isExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s ease' }} alt="expand" />
                           </motion.button>
                         </div>
                       </div>
@@ -9459,7 +9459,7 @@ function App() {
             >
             {/* TOP SECTION: 671x208 */}
             <div style={{
-              backgroundImage: 'url("https://raw.githubusercontent.com/northbeastclothing-design/MTRH/main/public/overlay-map-bg-%402x.png")',
+              backgroundImage: 'url("/overlay-map-bg-@2x.png")',
               backgroundSize: '100% 100%',
               backgroundPosition: 'center',
               height: isMobile ? '140px' : '208px',
@@ -9485,8 +9485,8 @@ function App() {
                 zIndex: 2
               }}>
                 <img 
-                  src="https://raw.githubusercontent.com/northbeastclothing-design/MTRH/main/public/mtrh-horiz-words.svg" 
-                  alt="MTRH Logo" 
+                  src="/mtrh-horiz-words.svg"
+                  alt="MTRH Logo"
                   style={{ width: '232px', height: '78px' }} 
                   referrerPolicy="no-referrer"
                 />
@@ -9494,8 +9494,8 @@ function App() {
 
               {/* ICONS IMAGE: 312x208 on the right */}
               <img 
-                src="https://raw.githubusercontent.com/northbeastclothing-design/MTRH/main/public/overlay-icons-%402x.png" 
-                alt="Icons Grid" 
+                src="/overlay-icons-@2x.png"
+                alt="Icons Grid"
                 style={{
                   position: 'absolute',
                   right: '0',

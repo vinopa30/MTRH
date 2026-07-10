@@ -1039,7 +1039,7 @@ export default function TimelinePage({
                     }}
                   >
                     {/* Drag Handle */}
-                    <div style={{ display: 'flex', alignItems: 'center', cursor: 'grab', marginRight: '-2px' }}>
+                    <div style={{ width: '16px', height: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'grab', flexShrink: 0 }}>
                       <svg 
                         width="10" 
                         height="14" 
@@ -1079,40 +1079,43 @@ export default function TimelinePage({
                         border: 'none',
                         cursor: 'pointer',
                         padding: 0,
-                        width: '30px',
+                        width: '24px',
                         height: '30px',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        marginLeft: '-4px'
+                        flexShrink: 0
                       }}
                       title={isCollapsed ? "Expand Era" : "Collapse Era"}
                     >
-                      <img 
-                        src={isCollapsed 
-                          ? "https://raw.githubusercontent.com/northbeastclothing-design/MTRH/main/public/icons/icon-arrow-down.svg" 
-                          : "https://raw.githubusercontent.com/northbeastclothing-design/MTRH/main/public/icons/icon-arrow-up.svg"
-                        } 
-                        style={{ 
-                          width: '30px', 
-                          height: '30px', 
-                          filter: 'brightness(0)' 
-                        }} 
-                        alt={isCollapsed ? "expand" : "collapse"} 
+                      {/* One local caret, rotated per state — every row is byte-identical and
+                          never waits on a rate-limited remote fetch (the old cause of the
+                          inconsistent / different-sized carets). */}
+                      <img
+                        src="/icons/icon-arrow-down.svg"
+                        style={{
+                          width: '18px',
+                          height: '18px',
+                          filter: theme.invert,
+                          transform: isCollapsed ? 'none' : 'rotate(180deg)',
+                          transition: 'transform 0.2s ease'
+                        }}
+                        alt={isCollapsed ? "expand" : "collapse"}
                       />
                     </button>
 
-                    <img 
-                      src={era.icon} 
-                      alt={era.name} 
-                      style={{ 
-                        height: '30px', 
-                        width: '30px', 
-                        display: 'block',
-                        objectFit: 'contain',
-                        marginLeft: '-4px'
-                      }} 
-                    />
+                    <div style={{ width: '30px', height: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <img
+                        src={era.icon}
+                        alt={era.name}
+                        style={{
+                          height: '30px',
+                          width: '30px',
+                          display: 'block',
+                          objectFit: 'contain'
+                        }}
+                      />
+                    </div>
                     <span style={{ 
                       fontSize: '10px', 
                       fontWeight: 'bold', 
