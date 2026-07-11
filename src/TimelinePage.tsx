@@ -270,11 +270,16 @@ export default function TimelinePage({
   const [onboardingStep, setOnboardingStep] = useState<number | null>(null);
 
   useEffect(() => {
+    // The tour anchors to fixed desktop pixel positions and its step-0 backdrop
+    // covers the whole screen — on mobile it overflowed the viewport (clipped
+    // tooltip) and blocked the pan gesture, making the timeline feel frozen.
+    // Suppress it on mobile, the same way the main app tour is; desktop keeps it.
+    if (isMobile) return;
     const completed = localStorage.getItem('mtrh_timeline_onboarding_completed');
     if (!completed) {
       setOnboardingStep(0);
     }
-  }, []);
+  }, [isMobile]);
   
   // Dragging state
   const [isDragging, setIsDragging] = useState(false);
@@ -998,8 +1003,12 @@ export default function TimelinePage({
                   style={{ display: 'flex', flexDirection: 'column', paddingBottom: isCollapsed ? '0px' : '16px' }}
                 >
                   {/* Layer Header */}
-                  <div 
-                    draggable={true}
+                  <div
+                    // Native HTML5 drag is desktop-only: on touch it does nothing and
+                    // swallows the pointer events the 4-way pan gesture depends on, so
+                    // the whole timeline felt unscrollable. Disable it on mobile so
+                    // drags fall through to the pan/scroll handler on the container.
+                    draggable={!isMobile}
                     onDragStart={(e) => {
                       const target = e.target as HTMLElement;
                       if (target.closest('button') || target.closest('a') || target.tagName === 'INPUT') {
@@ -1632,6 +1641,18 @@ export default function TimelinePage({
               const itemY = trackOffsets.offsets[selectedItem.id] || 100;
               const placeBelow = itemY < 260;
 
+              // Keep the card fully on-screen: clamp its left edge to the viewport
+              // (with a small margin) and aim the arrow at the actual item rather than
+              // the card centre. Universal — trims desktop edge overflow too, and is
+              // essential on the narrow mobile viewport where a fixed 320px card would
+              // otherwise spill off-screen.
+              const EDGE = 12;
+              const vw = typeof window !== 'undefined' ? window.innerWidth : 393;
+              const cardW = Math.min(320, vw - EDGE * 2);
+              const itemCenterPx = (itemCenterPct / 100) * vw;
+              const cardLeft = Math.max(EDGE, Math.min(Math.max(EDGE, vw - EDGE - cardW), itemCenterPx - cardW / 2));
+              const arrowLeft = Math.max(18, Math.min(cardW - 18, itemCenterPx - cardLeft));
+
               const tooltipTheme = {
                 bg: isMapDarkMode ? '#ffffff' : '#000000',
                 text: isMapDarkMode ? '#000000' : '#ffffff',
@@ -1646,15 +1667,15 @@ export default function TimelinePage({
               return (
                 <motion.div
                   key={selectedItem.id}
-                  initial={{ opacity: 0, scale: 0.95, x: '-50%', y: placeBelow ? '0%' : '-100%' }}
-                  animate={{ opacity: 1, scale: 1, x: '-50%', y: placeBelow ? '0%' : '-100%' }}
-                  exit={{ opacity: 0, scale: 0.95, x: '-50%', y: placeBelow ? '0%' : '-100%' }}
+                  initial={{ opacity: 0, scale: 0.95, y: placeBelow ? '0%' : '-100%' }}
+                  animate={{ opacity: 1, scale: 1, y: placeBelow ? '0%' : '-100%' }}
+                  exit={{ opacity: 0, scale: 0.95, y: placeBelow ? '0%' : '-100%' }}
                   transition={{ duration: 0.25, ease: 'easeOut' }}
                   style={{
                     position: 'absolute',
-                    left: `${itemCenterPct}%`,
+                    left: `${cardLeft}px`,
                     top: `${placeBelow ? itemY + 28 : itemY - 28}px`,
-                    width: '320px',
+                    width: `${cardW}px`,
                     zIndex: 1000,
                     pointerEvents: 'none'
                   }}
@@ -1708,7 +1729,7 @@ export default function TimelinePage({
                       width: 0,
                       height: 0,
                       borderStyle: 'solid',
-                      left: '50%',
+                      left: `${arrowLeft}px`,
                       transform: 'translateX(-50%)',
                       ...(placeBelow ? {
                         top: '-10px',

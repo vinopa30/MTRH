@@ -3330,17 +3330,21 @@ export default function CodexPage({
           borderColor: theme.border
         }}
         transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-        style={{ 
-          position: 'absolute', 
-          top: 0, 
-          right: 0, 
-          bottom: 0, 
-          width: '20px', 
-          borderLeft: `1px solid ${theme.border}`, 
-          zIndex: 100, 
+        style={{
+          // Desktop-only: this frames the dossier's slide-in on the right. On mobile
+          // the dossier is a full-screen sheet, so the bar was just a stray 20px
+          // white strip pinned to the right edge.
+          display: isMobile ? 'none' : 'block',
+          position: 'absolute',
+          top: 0,
+          right: 0,
+          bottom: 0,
+          width: '20px',
+          borderLeft: `1px solid ${theme.border}`,
+          zIndex: 100,
           pointerEvents: 'auto',
           backdropFilter: 'blur(8px)'
-        }} 
+        }}
       />
 
       {/* FULL SCREEN LIGHTBOX MODAL ARCHITECTURE */}

@@ -1,4 +1,5 @@
 import express from "express";
+import http from "http";
 import path from "path";
 import * as cheerio from 'cheerio';
 import fs from "fs";
@@ -1097,13 +1098,25 @@ ${modLink}
     }
   });
 
+  // Share ONE Node HTTP server for both Express and Vite's HMR websocket. In
+  // middlewareMode Vite otherwise opens its own ws on a separate port (24678) that
+  // a single-port tunnel (e.g. *.trycloudflare.com) can't reach — so HMR silently
+  // failed over the tunnel. Putting the ws on this shared server means it rides on
+  // PORT, and the Vite client auto-connects to the page's own origin: plain ws on
+  // localhost/LAN, wss through the tunnel on 443. No client-side port config needed.
+  const httpServer = http.createServer(app);
+
   // Vite middleware for development
   if (!isProduction) {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       // allowedHosts:true lets tunnels (e.g. *.trycloudflare.com) reach the dev
       // server; the host-check is a dev-only guard and we intentionally share it.
-      server: { middlewareMode: true, allowedHosts: true },
+      server: {
+        middlewareMode: true,
+        allowedHosts: true,
+        hmr: { server: httpServer },
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
@@ -1134,7 +1147,7 @@ ${modLink}
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
 }

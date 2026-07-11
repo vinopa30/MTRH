@@ -5933,20 +5933,28 @@ function App() {
         {/* BRAND HEADER COMPONENT — compact on mobile, nav pill replaced by the bottom tab bar */}
         <header
           style={{
-            height: isMobile ? '48px' : '118px',
+            // On mobile, reserve the notch / status-bar safe area at the TOP — the
+            // app already does this at the BOTTOM for the tab bar, but nothing did it
+            // up here, so on a notched iPhone the unreserved notch stacked on the 48px
+            // header and read as a ~2x-tall header. border-box + a top pad of
+            // env(safe-area-inset-top) keeps a compact 48px content strip that clears
+            // the notch, and the page panels (below) start right under it.
+            height: isMobile ? 'calc(48px + env(safe-area-inset-top, 0px))' : '118px',
+            boxSizing: 'border-box',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '0 20px 0 0',
+            padding: isMobile ? 'env(safe-area-inset-top, 0px) 20px 0 0' : '0 20px 0 0',
             flexShrink: 0,
             zIndex: 20,
             pointerEvents: 'none',
             position: 'relative',
-            // Keep the map header transparent (full-bleed map); give timeline/codex
-            // a solid header on mobile so it's a clean bar, not a gray map void.
-            background: (isMobile && (currentPage === 'codex' || currentPage === 'timeline'))
-              ? theme.bg
-              : ((currentPage === 'map' || currentPage === 'codex' || currentPage === 'timeline') ? 'transparent' : (isMapDarkMode ? '#000000' : '#ffffff')),
+            // Header floats over the backdrop on every page and breakpoint: the map
+            // (or the timeline/codex gray map backdrop) shows *behind* the header
+            // content instead of being a separate opaque bar stacked above it.
+            background: (currentPage === 'map' || currentPage === 'codex' || currentPage === 'timeline')
+              ? 'transparent'
+              : (isMapDarkMode ? '#000000' : '#ffffff'),
             transition: 'background-color 0.3s ease'
           }}
         >
@@ -8626,7 +8634,21 @@ function App() {
             {/* CUSTOM TIMELINE TOOLTIP OVERLAY - ALIGNED TO DOTS FIELD (visual area has 20px side margins) */}
             <div style={{ position: 'absolute', top: '40px', bottom: 0, left: '20px', right: '20px', pointerEvents: 'none', overflow: 'visible', zIndex: 1000 }}>
               <AnimatePresence>
-                {hoveredBucket && (
+                {hoveredBucket && (() => {
+                  // Clamp the bubble so it never spills past the viewport: treat maxW
+                  // as the worst-case width and keep its centre within
+                  // [edge + maxW/2, vw - edge - maxW/2] — the same universal approach as
+                  // the timeline details card. On mobile it also wraps instead of
+                  // forcing a single nowrap line off-screen.
+                  const EDGE = 12;
+                  const vw = typeof window !== 'undefined' ? window.innerWidth : 393;
+                  const maxW = Math.min(300, vw - EDGE * 2);
+                  const containerW = Math.max(1, vw - 40); // overlay is inset 20px each side
+                  const centerPx = 20 + (hoveredBucket.x / 100) * containerW;
+                  const clampedCenter = Math.max(EDGE + maxW / 2, Math.min(vw - EDGE - maxW / 2, centerPx));
+                  const leftInContainer = clampedCenter - 20;
+                  const arrowOffset = Math.max(-(maxW / 2 - 12), Math.min(maxW / 2 - 12, centerPx - clampedCenter));
+                  return (
                   <motion.div
                     initial={{ opacity: 0, y: 5, x: '-50%' }}
                     animate={{ opacity: 1, y: 0, x: '-50%' }}
@@ -8634,19 +8656,22 @@ function App() {
                     transition={{ duration: 0.2 }}
                     style={{
                       position: 'absolute',
-                      left: `${hoveredBucket.x}%`,
+                      left: `${leftInContainer}px`,
                       bottom: `${hoveredBucket.bottom}px`,
+                      maxWidth: `${maxW}px`,
                       background: '#000000',
                       color: '#ffffff',
-                      padding: '0 12px',
-                      height: '24px',
+                      padding: isMobile ? '6px 12px' : '0 12px',
+                      minHeight: '24px',
                       display: 'flex',
                       alignItems: 'center',
-                      borderRadius: '50px',
+                      justifyContent: 'center',
+                      textAlign: 'center',
+                      borderRadius: '16px',
                       fontSize: '10px',
                       fontWeight: '500',
                       fontFamily: '"Space Mono", monospace',
-                      whiteSpace: 'nowrap'
+                      whiteSpace: isMobile ? 'normal' : 'nowrap'
                     }}
                   >
                     {hoveredBucket.count} {hoveredBucket.cat.toUpperCase()} AROUND {hoveredBucket.year}
@@ -8654,7 +8679,7 @@ function App() {
                     <div style={{
                       position: 'absolute',
                       bottom: '-8px',
-                      left: '50%',
+                      left: `calc(50% + ${arrowOffset}px)`,
                       transform: 'translateX(-50%)',
                       width: '0',
                       height: '0',
@@ -8663,7 +8688,8 @@ function App() {
                       borderTop: '8px solid #000000'
                     }} />
                   </motion.div>
-                )}
+                  );
+                })()}
               </AnimatePresence>
             </div>
           </motion.div>
@@ -8676,7 +8702,7 @@ function App() {
         <div
           style={{
             position: 'absolute',
-            top: isMobile ? 48 : 0,
+            top: isMobile ? 'calc(48px + env(safe-area-inset-top, 0px))' : 0,
             left: 0,
             right: 0,
             bottom: isMobile ? 40 : 0,
@@ -8719,15 +8745,15 @@ function App() {
         <div
           style={{
             position: 'absolute',
-            top: 0,
+            top: isMobile ? 'calc(48px + env(safe-area-inset-top, 0px))' : 0,
             left: 0,
             right: 0,
-            bottom: 0,
+            bottom: isMobile ? 40 : 0,
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
             width: '100%',
-            height: '100%',
+            height: isMobile ? 'auto' : '100%',
             pointerEvents: currentPage === 'codex' ? 'auto' : 'none',
             visibility: currentPage === 'codex' ? 'visible' : 'hidden',
             opacity: currentPage === 'codex' ? 1 : 0,
